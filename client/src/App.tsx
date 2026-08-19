@@ -10,6 +10,9 @@ import { OrganizerEvents } from './routes/organizer/OrganizerEvents';
 import { NewEvent } from './routes/organizer/NewEvent';
 import { ScanPage } from './routes/organizer/ScanPage';
 import { EventDashboard } from './routes/organizer/EventDashboard';
+import { AttendeeHome } from './routes/attendee/AttendeeHome';
+import { AttendeeEvents } from './routes/attendee/AttendeeEvents';
+import { Ticket } from './routes/attendee/Ticket';
 
 /** Route table. Role gating is one wrapper per branch — see RequireRole. */
 export function App() {
@@ -66,6 +69,40 @@ export function App() {
           element={
             <RequireRole role="ORGANIZER">
               <EventDashboard />
+            </RequireRole>
+          }
+        />
+
+        {/* Attendee */}
+        <Route
+          path="/attendee"
+          element={
+            <RequireRole role="ATTENDEE">
+              <AttendeeHome />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/attendee/events"
+          element={
+            <RequireRole role="ATTENDEE">
+              <AttendeeEvents />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/attendee/events/:id"
+          element={
+            <RequireRole role="ATTENDEE">
+              <EventDetail />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/attendee/ticket/:id"
+          element={
+            <RequireRole role="ATTENDEE">
+              <Ticket />
             </RequireRole>
           }
         />

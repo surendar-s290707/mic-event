@@ -226,6 +226,10 @@
   background: var(--warn);
 }
 @media (max-width: 520px) {
+  /* Tiny screens keep the dot only — the label costs more room than it earns. */
+  .apistatus {
+    padding: 5px;
+  }
   .apistatus__text {
     display: none;
   }
