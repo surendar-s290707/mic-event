@@ -1,0 +1,64 @@
+/* ---------------------------------------------------------------------------
+   Design tokens — the single source of truth for colour, type and spacing.
+   One accent colour, everything else neutral. Semantic colours (success /
+   warning / danger) are only used for status, never for decoration.
+--------------------------------------------------------------------------- */
+:root {
+  /* Neutrals */
+  --bg: #fbfbfd;
+  --surface: #ffffff;
+  --surface-2: #f4f4f7;
+  --surface-3: #ebebf0;
+  --line: #e6e6ec;
+  --line-strong: #d6d6df;
+
+  /* Text */
+  --ink: #101014;
+  --ink-2: #43434f;
+  --ink-3: #75758a;
+
+  /* Accent — exactly one */
+  --accent: #5b3df5;
+  --accent-hover: #4a2ee0;
+  --accent-soft: #efecff;
+  --accent-line: #d9d2ff;
+  --on-accent: #ffffff;
+
+  /* Status */
+  --success: #0b8c5f;
+  --success-soft: #e7f6ef;
+  --warn: #a55a06;
+  --warn-soft: #fdf2e3;
+  --danger: #cf2222;
+  --danger-soft: #fdecec;
+
+  /* Type */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-full: 999px;
+
+  /* Elevation — used sparingly */
+  --shadow-sm: 0 1px 2px rgba(16, 16, 20, 0.06);
+  --shadow-md: 0 8px 28px -12px rgba(16, 16, 20, 0.22);
+  --shadow-lg: 0 24px 60px -24px rgba(16, 16, 20, 0.32);
+
+  /* Spacing scale */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 72px;
+
+  /* Layout */
+  --page-max: 1080px;
+  --header-h: 64px;
+}

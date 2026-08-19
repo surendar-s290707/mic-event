@@ -1,0 +1,32 @@
+{
+  "name": "mic-event",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "MIC Event Check-In System",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w client",
+    "server": "npm run dev -w server",
+    "start": "concurrently -n server,client -c cyan,magenta \"npm:server\" \"npm:dev\"",
+    "build": "npm run build -w server && npm run build -w client",
+    "start:prod": "npm run start -w server",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^15.15.0",
+    "typescript-eslint": "^8.67.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
