@@ -8,7 +8,13 @@ const rootDir = new URL('..', import.meta.url).pathname;
 // that to the Express server, so there is no CORS setup and no hard-coded host
 // in frontend code. In production VITE_API_BASE_URL points at the API origin.
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, rootDir, '');
+  const env = loadEnv(mode, rootDir, 'VITE_');
+
+  // Deliberately NOT read from PORT: some dev runners set PORT for the Vite
+  // process itself, which would make the proxy point back at this server.
+  // 127.0.0.1 rather than localhost, which can resolve to ::1 while the API
+  // listens on IPv4.
+  const apiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:4000';
 
   return {
     plugins: [react()],
@@ -16,10 +22,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        '/api': {
-          target: `http://localhost:${env.PORT || 4000}`,
-          changeOrigin: true,
-        },
+        '/api': { target: apiTarget, changeOrigin: true },
       },
     },
     build: {
