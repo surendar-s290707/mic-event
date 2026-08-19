@@ -1,0 +1,88 @@
+// ===========================================================================
+// DRAFT SCHEMA — NOT MIGRATED YET.
+// ===========================================================================
+// There is no database in this milestone: nothing here has been generated,
+// migrated or queried. It is checked in so the mock data shapes in
+// client/src/lib/types.ts have an obvious destination, and so the constraints
+// that the hard requirements depend on are decided before the code is written.
+//
+// The two constraints that matter most:
+//   Registration @@unique([eventId, attendeeId]) — one registration per person
+//   CheckIn      registrationId @unique          — one check-in per registration
+// Those are what actually prevent duplicate check-ins across several server
+// processes; application-level checks are only a fast path in front of them.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ORGANIZER
+  ATTENDEE
+}
+
+enum CheckInMethod {
+  SCAN
+  MANUAL
+  OFFLINE_SYNC
+}
+
+model User {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime       @default(now())
+
+  events        Event[]
+  registrations Registration[]
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  venue       String
+  startsAt    DateTime
+  endsAt      DateTime
+  capacity    Int
+  organizerId String
+  createdAt   DateTime @default(now())
+
+  organizer     User           @relation(fields: [organizerId], references: [id])
+  registrations Registration[]
+
+  @@index([startsAt])
+}
+
+model Registration {
+  id         String   @id @default(cuid())
+  eventId    String
+  attendeeId String
+  createdAt  DateTime @default(now())
+
+  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendee User     @relation(fields: [attendeeId], references: [id])
+  checkIn  CheckIn?
+
+  // One person can hold at most one registration per event.
+  @@unique([eventId, attendeeId])
+  @@index([eventId])
+}
+
+model CheckIn {
+  id             String        @id @default(cuid())
+  registrationId String        @unique // <- what makes a second scan fail
+  checkedInAt    DateTime      @default(now())
+  method         CheckInMethod @default(SCAN)
+  // Set for scans that were queued offline, so sync is idempotent.
+  clientScanId   String?       @unique
+
+  registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+}
