@@ -39,7 +39,7 @@ describe('AI event insights', () => {
       const attendee = createClient(server.baseUrl);
       await signUp(attendee, 'ATTENDEE');
       const registration = await attendee.post(`/api/events/${event.id}/register`);
-      tokens.push(registration.body.ticket.qrToken);
+      tokens.push(registration.body.ticket.qrPayload);
     }
     for (let i = 0; i < checkedIn; i += 1) {
       await organizer.post(`/api/events/${event.id}/check-in`, { token: tokens[i] });
@@ -222,7 +222,7 @@ describe('AI insights — the model call', () => {
     for (let i = 0; i < 4; i += 1) {
       const attendee = createClient(server.baseUrl);
       await signUp(attendee, 'ATTENDEE');
-      tokens.push((await attendee.post(`/api/events/${event.id}/register`)).body.ticket.qrToken);
+      tokens.push((await attendee.post(`/api/events/${event.id}/register`)).body.ticket.qrPayload);
     }
     for (let i = 0; i < 3; i += 1) {
       await organizer.post(`/api/events/${event.id}/check-in`, { token: tokens[i] });

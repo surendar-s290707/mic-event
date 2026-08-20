@@ -78,7 +78,7 @@ describe('live dashboard (socket.io)', () => {
       'check-in',
     );
     await organizer.post(`/api/events/${event.id}/check-in`, {
-      token: ticket.qrToken,
+      token: ticket.qrPayload,
       stationId: 'door-a',
     });
 
@@ -100,7 +100,7 @@ describe('live dashboard (socket.io)', () => {
       scans: [
         {
           clientScanId: 'scan-live-0001',
-          token: ticket.qrToken,
+          token: ticket.qrPayload,
           scannedAt: new Date(Date.now() - 60_000).toISOString(),
           stationId: 'door-b',
         },
@@ -119,14 +119,14 @@ describe('live dashboard (socket.io)', () => {
 
     // Subscribe before triggering, or the emit races ahead of the listener.
     const firstArrival = waitFor(socket, 'check-in');
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
     await firstArrival; // the real one
 
     let extra = 0;
     socket.on('check-in', () => {
       extra += 1;
     });
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     assert.equal(extra, 0, 'a duplicate scan is not news');
@@ -173,7 +173,7 @@ describe('live dashboard (socket.io)', () => {
       received += 1;
     });
 
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     assert.equal(received, 0);

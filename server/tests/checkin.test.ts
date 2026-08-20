@@ -39,7 +39,7 @@ describe('check-in', () => {
     const { organizer, event, ticket, account } = await scenario();
 
     const response = await organizer.post(`/api/events/${event.id}/check-in`, {
-      token: ticket.qrToken,
+      token: ticket.qrPayload,
       stationId: 'door-a',
     });
 
@@ -52,8 +52,8 @@ describe('check-in', () => {
   it('rejects the same ticket the second time, with the original timestamp', async () => {
     const { organizer, event, ticket } = await scenario();
 
-    const first = await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
-    const second = await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    const first = await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
+    const second = await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
 
     assert.equal(second.body.success, false);
     assert.equal(second.body.reason, 'ALREADY_CHECKED_IN');
@@ -81,7 +81,7 @@ describe('check-in', () => {
     const otherEvent = await createEvent(organizer, { name: 'Another Event' });
 
     const response = await organizer.post(`/api/events/${otherEvent.id}/check-in`, {
-      token: ticket.qrToken,
+      token: ticket.qrPayload,
     });
 
     assert.equal(response.body.success, false);
@@ -101,7 +101,7 @@ describe('check-in', () => {
     // Twelve scanners hitting the same ticket in the same instant.
     const results = await Promise.all(
       Array.from({ length: 12 }, () =>
-        organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken }),
+        organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload }),
       ),
     );
 
@@ -122,7 +122,7 @@ describe('check-in', () => {
     const before = await attendee.get(`/api/events/${event.id}/registration`);
     assert.equal(before.body.ticket.checkedIn, false);
 
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
 
     const after = await attendee.get(`/api/events/${event.id}/registration`);
     assert.equal(after.body.ticket.checkedIn, true);
@@ -132,7 +132,7 @@ describe('check-in', () => {
   it('counts the check-in on the organizer dashboard', async () => {
     const { organizer, event, ticket } = await scenario();
 
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
 
     const stats = await organizer.get(`/api/events/${event.id}/stats`);
     assert.equal(stats.body.stats.registeredCount, 1);
@@ -143,7 +143,7 @@ describe('check-in', () => {
 
   it('exports attendance as CSV for the owning organizer only', async () => {
     const { organizer, event, ticket, account } = await scenario();
-    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrToken });
+    await organizer.post(`/api/events/${event.id}/check-in`, { token: ticket.qrPayload });
 
     const response = await organizer.get(`/api/events/${event.id}/export.csv`);
     assert.equal(response.status, 200);

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
@@ -7,12 +8,42 @@ import { Qr } from '../../components/Qr';
 
 /**
  * The attendee's ticket: one QR per registration, never one code for the whole
- * event. The QR holds only the opaque token the server issued — the API
- * returns it to the owner of the registration and to nobody else.
+ * event.
+ *
+ * The QR holds a token that expires after a minute, and this page refetches it
+ * before it does, so a screenshot someone sent to a friend stops working. The
+ * registration's permanent secret never reaches the browser at all.
  */
 export function Ticket() {
   const { id = '' } = useParams();
   const request = useAsync(() => api.getTicket(id).then((r) => r.ticket), [id]);
+  const reload = request.reload;
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+
+  const expiresAt = request.data?.qrExpiresAt;
+
+  // Refresh a few seconds before the code dies, and immediately when the phone
+  // comes back to the foreground at the door.
+  useEffect(() => {
+    if (!expiresAt) return;
+
+    const tick = () => {
+      const remaining = Math.round((new Date(expiresAt).getTime() - Date.now()) / 1000);
+      setSecondsLeft(Math.max(0, remaining));
+      if (remaining <= 5) void reload();
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void reload();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [expiresAt, reload]);
 
   if (request.loading) {
     return (
@@ -65,7 +96,7 @@ export function Ticket() {
 
         <div className="ticket__qr">
           <div className="ticket__qrframe">
-            <Qr value={ticket.qrToken} size={200} />
+            <Qr value={ticket.qrPayload} size={200} />
           </div>
           <strong style={{ fontSize: '1rem' }}>
             {ticket.checkedIn ? 'You’re already inside' : 'Show this at the entrance.'}
@@ -73,8 +104,19 @@ export function Ticket() {
           <span className="muted" style={{ fontSize: '0.8rem' }}>
             {ticket.checkedIn
               ? `Scanned at ${formatTime(ticket.checkedInAt!)}`
-              : 'One scan, one entry.'}
+              : secondsLeft === null
+                ? 'This code refreshes every minute.'
+                : `This code refreshes every minute · ${secondsLeft}s left`}
           </span>
+          {!ticket.checkedIn && (
+            <span
+              className="mono muted"
+              style={{ fontSize: '0.66rem', wordBreak: 'break-all', textAlign: 'center' }}
+              title="Read this out if the camera won’t scan"
+            >
+              {ticket.qrPayload}
+            </span>
+          )}
         </div>
 
         <div className="ticket__foot">

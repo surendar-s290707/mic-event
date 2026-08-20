@@ -1,4 +1,5 @@
 import type { CheckIn, Event, Registration, User } from '@prisma/client';
+import { issueTicketToken } from './ticketToken.js';
 
 /**
  * One place that decides what the API exposes.
@@ -50,15 +51,22 @@ export function serializeEvent(
 export type SerializedEvent = ReturnType<typeof serializeEvent>;
 
 /**
- * A ticket. The QR token is included because the owner needs to render it —
- * it is only ever returned to the attendee it belongs to.
+ * A ticket.
+ *
+ * `qrPayload` is a freshly issued token that expires in a minute; the
+ * registration's permanent secret is never serialized, so there is nothing
+ * durable in this response for a screenshot or a copied network body to reuse.
  */
 export function serializeTicket(
   registration: Registration & { checkIn: CheckIn | null; event: EventWithOrganizer; user: User },
 ) {
+  const token = issueTicketToken(registration.id, registration.qrToken);
+
   return {
     id: registration.id,
-    qrToken: registration.qrToken,
+    qrPayload: token.payload,
+    qrExpiresAt: token.expiresAt,
+    qrTtlSeconds: token.ttlSeconds,
     createdAt: registration.createdAt.toISOString(),
     checkedIn: Boolean(registration.checkIn),
     checkedInAt: registration.checkIn?.checkedInAt.toISOString() ?? null,

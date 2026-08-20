@@ -48,6 +48,13 @@ export const env = {
   get anthropicBaseUrl(): string | undefined {
     return process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
   },
+  /**
+   * How long a displayed ticket code stays valid. Shorter is safer against
+   * screenshot sharing but demands a more reliable connection at the door.
+   */
+  get ticketTtlSeconds(): number {
+    return Number(process.env.TICKET_TTL_SECONDS ?? 60);
+  },
   /** How long the model gets before the endpoint falls back to raw numbers. */
   get aiTimeoutMs(): number {
     return Number(process.env.AI_TIMEOUT_MS ?? 8000);

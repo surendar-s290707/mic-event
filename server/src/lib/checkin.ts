@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
+import { resolveTicketToken } from './ticketToken.js';
 
 /**
  * One implementation of "record this scan", used by the live scanner endpoint
@@ -36,6 +37,7 @@ export type CheckInOutcome =
   | 'ALREADY_CHECKED_IN'
   | 'ALREADY_SYNCED'
   | 'INVALID_TICKET'
+  | 'EXPIRED_TICKET'
   | 'WRONG_EVENT';
 
 export interface CheckInResult {
@@ -90,8 +92,24 @@ export async function recordCheckIn(input: CheckInInput): Promise<CheckInResult>
     }
   }
 
+  // The scanned value is a short-lived signed token. Expiry is judged against
+  // when the scanner saw it, so a scan queued offline still validates.
+  const seenAt = scannedAt ?? new Date();
+  const resolved = await resolveTicketToken(input.token, seenAt);
+
+  if (!resolved.ok) {
+    if (resolved.failure === 'expired') {
+      return {
+        success: false,
+        reason: 'EXPIRED_TICKET',
+        message: 'That code has expired. Ask them to reopen their ticket for a fresh one.',
+      };
+    }
+    return { success: false, reason: 'INVALID_TICKET', message: 'We don’t recognise this ticket.' };
+  }
+
   const registration = await prisma.registration.findUnique({
-    where: { qrToken: input.token },
+    where: { id: resolved.registrationId },
     include: { user: true },
   });
 

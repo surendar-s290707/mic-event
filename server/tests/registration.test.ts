@@ -40,10 +40,13 @@ describe('registration', () => {
     const ticket = response.body.ticket;
     assert.equal(ticket.attendee.name, account.name);
     assert.equal(ticket.checkedIn, false);
-    assert.ok(ticket.qrToken.length >= 32, 'token is long enough to be unguessable');
-    // The token must not carry anything about the person or the event.
-    assert.equal(ticket.qrToken.includes(account.email), false);
-    assert.equal(ticket.qrToken.includes(event.id), false);
+    // A short-lived signed token, not the registration's permanent secret.
+    assert.match(ticket.qrPayload, /^MIC1\./);
+    assert.ok(new Date(ticket.qrExpiresAt) > new Date(), 'comes with a future expiry');
+    // It carries nothing about the person or the event.
+    assert.equal(ticket.qrPayload.includes(account.email), false);
+    assert.equal(ticket.qrPayload.includes(account.name), false);
+    assert.equal(ticket.qrPayload.includes(event.id), false);
   });
 
   it('gives two attendees different tokens', async () => {
@@ -57,7 +60,7 @@ describe('registration', () => {
     const one = await first.post(`/api/events/${event.id}/register`);
     const two = await second.post(`/api/events/${event.id}/register`);
 
-    assert.notEqual(one.body.ticket.qrToken, two.body.ticket.qrToken);
+    assert.notEqual(one.body.ticket.qrPayload, two.body.ticket.qrPayload);
   });
 
   it('refuses a second registration from the same attendee', async () => {

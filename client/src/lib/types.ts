@@ -39,7 +39,10 @@ export interface EventSummary {
 
 export interface Ticket {
   id: string;
-  qrToken: string;
+  /** Short-lived signed token shown in the QR. Expires — refetch to refresh. */
+  qrPayload: string;
+  qrExpiresAt: string;
+  qrTtlSeconds: number;
   createdAt: string;
   checkedIn: boolean;
   checkedInAt: string | null;
@@ -69,7 +72,11 @@ export interface StatsResponse {
   arrivals: string[];
 }
 
-export type ScanFailureReason = 'ALREADY_CHECKED_IN' | 'INVALID_TICKET' | 'WRONG_EVENT';
+export type ScanFailureReason =
+  | 'ALREADY_CHECKED_IN'
+  | 'INVALID_TICKET'
+  | 'EXPIRED_TICKET'
+  | 'WRONG_EVENT';
 
 export type ScanResult =
   | {

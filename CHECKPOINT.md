@@ -19,7 +19,7 @@ reads and writes PostgreSQL through the API.
 | Event creation | ✅ | Server-validated, creator becomes owner |
 | Event listing | ✅ | Role-scoped: organizers see their own, attendees see open events |
 | Registration | ✅ | Transactional capacity + unique `(eventId, userId)` |
-| QR tokens | ✅ | 32 random bytes, base64url, unique, carries no personal data |
+| QR tokens | ✅ | Rotating signed tokens, 60s life; permanent secret stays server-side |
 | Attendee ticket | ✅ | Real scannable QR via `qrcode`, owner-only |
 | Scanner | ✅ | Real camera via `html5-qrcode`, cooldown, typed-code fallback |
 | Check-in | ✅ | Four verdicts; duplicates caught by a unique constraint |
@@ -31,14 +31,13 @@ reads and writes PostgreSQL through the API.
 | Offline scanning | ✅ | IndexedDB queue, auto-sync on reconnect, idempotent replay |
 | Live updates | ✅ | Socket.IO, authenticated, room per event, owner-only |
 | AI insights | ✅ | Facts computed in SQL; the model only phrases them; raw-number fallback |
-| Tests | ✅ | 69 integration tests against a real database |
+| Tests | ✅ | 80 integration tests against a real database |
 
 ## Not implemented yet
 
 | Requirement | Milestone |
 | ----------- | --------- |
 | Standalone 100+ concurrent request proof script + log | 3 |
-| Rotating / expiring QR tokens (currently long-lived opaque tokens) | 4 |
 
 ---
 
@@ -139,22 +138,44 @@ Signup and login set `mic_session`: a JWT signed with `JWT_SECRET`, HTTP-only (J
 it), `SameSite=Lax`, `Secure` in production, 7-day expiry. `requireAuth` re-reads the user row on
 every request rather than trusting the token's contents.
 
-## QR design
+## QR design and the sharing tradeoff
 
-The QR holds only an opaque `qrToken` — 32 random bytes, base64url. No name, email or event id, so a
-leaked screenshot reveals nothing about its owner and is useless without an organizer session.
+A QR code is an image, so the QR holds nothing permanent. What the attendee's screen shows is a
+token that dies after a minute:
 
-**Current limitation:** the token is long-lived and stays valid after check-in (a second scan is
-rejected because the registration already has a check-in row, not because the token was invalidated).
-Screenshot-sharing is therefore only *partly* mitigated: the second person to arrive is refused, but
-the system cannot tell which of the two was the real attendee. Milestone 4 replaces this with
-short-lived rotating tokens, and the write-up will cover the tradeoff.
+```
+MIC1.<registrationId>.<expiryUnixSeconds>.<hmac>
+```
+
+The HMAC covers all three parts plus the registration's permanent `qrToken`, keyed with
+`JWT_SECRET`. The permanent secret is **never serialized** — it is in no API response — so there is
+nothing durable for an attendee to copy out of their own network tab, and a screenshot taken at 6:30
+is refused at 6:35 with "Code expired". The ticket page counts down and refetches before expiry, and
+again whenever the phone comes back to the foreground.
+
+**The tradeoff.** Rotating tokens need the *attendee's* phone to be online at the door. That is the
+cost of the approach, and it is the reason it is paired with two things: the scanner queues offline
+by itself (so patchy wifi at the venue only ever blocks the attendee's refresh, not the check-in),
+and the ticket prints its current code as text, so an organizer can type it in for someone whose
+phone is dead or offline.
+
+The alternative — one-time tokens invalidated on scan — needs no connection but leaves a shared
+screenshot valid until the first person walks in, and then refuses the genuine attendee with no way
+to tell which of the two was real. Expiry makes the window minutes wide instead of days.
+
+**Offline scans are judged at the door, not at sync time.** A scan queued at 18:30 and synced at
+19:10 is validated against 18:30, so an honest offline check-in is not punished for the network. The
+scanner is an authenticated organizer, so its clock is a trusted-enough witness, and `scannedAt` is
+already clamped to a sane range (nothing in the future beyond a minute, nothing older than a day).
+
+Duplicate protection is unchanged and independent: a registration can still only ever hold one
+check-in row.
 
 ---
 
 ## Verification performed
 
-**Automated** — `npm test`: 69 tests, 69 passing, 0 failing (~24s).
+**Automated** — `npm test`: 80 tests, 80 passing, 0 failing (~30s).
 
 - auth: signup, login, wrong password, logout, unauthenticated rejection, duplicate email, malformed
   input, bcrypt hash stored, no `passwordHash` in any response, tampered cookie rejected
@@ -164,6 +185,11 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 - registration: valid, duplicate, nonexistent event, finished event, invalid capacity (0, negative,
   fractional, non-numeric), backwards dates
 - check-in: valid, duplicate (with the original timestamp), invalid token, wrong event, empty token
+- rotating tokens: the permanent secret never appears in any response; a new token is issued on
+  every ticket read; an expired code is refused and lets nobody in; edited expiry, a swapped
+  registration id and malformed codes are all rejected; a scan queued while the code was still
+  valid syncs successfully, while one that was already stale at the door does not; wrong-event
+  detection still works
 - AI insights: the four required figures are computed correctly from the database, including the
   no-peak and nobody-registered edge cases; question validation; owner-only access; no key material
   in any response. Against a stub Anthropic endpoint: the model's wording is used on success, the

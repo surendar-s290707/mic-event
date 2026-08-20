@@ -57,6 +57,12 @@ export function CheckInResult({ result }: { result: ScannerFeedback }) {
       title: 'Invalid ticket',
       body: 'We don’t recognise this code. Ask them to open their ticket again.',
     },
+    EXPIRED_TICKET: {
+      className: 'result--warn',
+      icon: '⏱',
+      title: 'Code expired',
+      body: 'Ticket codes refresh every minute. Ask them to reopen their ticket and scan again.',
+    },
     WRONG_EVENT: {
       className: 'result--error',
       icon: '✕',

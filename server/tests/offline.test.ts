@@ -52,7 +52,7 @@ describe('offline scan sync', () => {
     const { organizer, event, tickets } = await scenario();
 
     const response = await organizer.post(`/api/events/${event.id}/check-in/sync`, {
-      scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0001', 5)],
+      scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0001', 5)],
     });
 
     assert.equal(response.status, 200);
@@ -65,7 +65,7 @@ describe('offline scan sync', () => {
     const { organizer, event, tickets } = await scenario();
 
     await organizer.post(`/api/events/${event.id}/check-in/sync`, {
-      scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0002', 30)],
+      scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0002', 30)],
     });
 
     const stats = await organizer.get(`/api/events/${event.id}/stats`);
@@ -79,7 +79,7 @@ describe('offline scan sync', () => {
 
   it('never creates two check-ins when the same queue is replayed', async () => {
     const { organizer, event, tickets } = await scenario();
-    const batch = { scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0003', 5)] };
+    const batch = { scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0003', 5)] };
 
     const first = await organizer.post(`/api/events/${event.id}/check-in/sync`, batch);
     const second = await organizer.post(`/api/events/${event.id}/check-in/sync`, batch);
@@ -97,7 +97,7 @@ describe('offline scan sync', () => {
 
   it('stays at one check-in when the whole batch is replayed concurrently', async () => {
     const { organizer, event, tickets } = await scenario();
-    const batch = { scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0004', 5)] };
+    const batch = { scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0004', 5)] };
 
     const responses = await Promise.all(
       Array.from({ length: 8 }, () => organizer.post(`/api/events/${event.id}/check-in/sync`, batch)),
@@ -122,7 +122,7 @@ describe('offline scan sync', () => {
    */
   it('reports a duplicate — and corrects the time — when A syncs after B scanned online', async () => {
     const { organizer, event, tickets } = await scenario();
-    const token = tickets[0].ticket.qrToken;
+    const token = tickets[0].ticket.qrPayload;
 
     // Station B scans online, now.
     const online = await organizer.post(`/api/events/${event.id}/check-in`, {
@@ -157,7 +157,7 @@ describe('offline scan sync', () => {
 
   it('leaves the stored time alone when the queued scan is the later one', async () => {
     const { organizer, event, tickets } = await scenario();
-    const token = tickets[0].ticket.qrToken;
+    const token = tickets[0].ticket.qrPayload;
 
     const online = await organizer.post(`/api/events/${event.id}/check-in`, { token });
     const sync = await organizer.post(`/api/events/${event.id}/check-in/sync`, {
@@ -176,7 +176,7 @@ describe('offline scan sync', () => {
     const response = await organizer.post(`/api/events/${otherEvent.id}/check-in/sync`, {
       scans: [
         scan('never-issued-token', 'scan-offline-0007', 3),
-        scan(tickets[0].ticket.qrToken, 'scan-offline-0008', 2),
+        scan(tickets[0].ticket.qrPayload, 'scan-offline-0008', 2),
       ],
     });
 
@@ -187,10 +187,10 @@ describe('offline scan sync', () => {
   it('syncs a mixed batch and returns one result per scan, in order', async () => {
     const { organizer, event, tickets } = await scenario(3);
     const scans = [
-      scan(tickets[0].ticket.qrToken, 'scan-batch-0001', 9),
-      scan(tickets[1].ticket.qrToken, 'scan-batch-0002', 6),
-      scan(tickets[1].ticket.qrToken, 'scan-batch-0003', 4), // same person twice
-      scan(tickets[2].ticket.qrToken, 'scan-batch-0004', 2),
+      scan(tickets[0].ticket.qrPayload, 'scan-batch-0001', 9),
+      scan(tickets[1].ticket.qrPayload, 'scan-batch-0002', 6),
+      scan(tickets[1].ticket.qrPayload, 'scan-batch-0003', 4), // same person twice
+      scan(tickets[2].ticket.qrPayload, 'scan-batch-0004', 2),
     ];
 
     const response = await organizer.post(`/api/events/${event.id}/check-in/sync`, { scans });
@@ -217,7 +217,7 @@ describe('offline scan sync', () => {
       scans: [
         {
           clientScanId: 'scan-offline-0009',
-          token: tickets[0].ticket.qrToken,
+          token: tickets[0].ticket.qrPayload,
           scannedAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
           stationId: 'wrong-clock',
         },
@@ -235,14 +235,14 @@ describe('offline scan sync', () => {
     const intruder = createClient(server.baseUrl);
     await signUp(intruder, 'ORGANIZER');
     const asOrganizer = await intruder.post(`/api/events/${event.id}/check-in/sync`, {
-      scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0010', 1)],
+      scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0010', 1)],
     });
     assert.equal(asOrganizer.status, 403);
 
     const attendee = createClient(server.baseUrl);
     await signUp(attendee, 'ATTENDEE');
     const asAttendee = await attendee.post(`/api/events/${event.id}/check-in/sync`, {
-      scans: [scan(tickets[0].ticket.qrToken, 'scan-offline-0011', 1)],
+      scans: [scan(tickets[0].ticket.qrPayload, 'scan-offline-0011', 1)],
     });
     assert.equal(asAttendee.status, 403);
   });
