@@ -1,19 +1,30 @@
 import { Router } from 'express';
 import { env } from '../env.js';
+import { prisma } from '../lib/prisma.js';
 
 export const healthRouter = Router();
 
 /**
  * GET /api/health
- * Cheap liveness probe. The client shows a small dev status pill based on it.
- * Later milestones will extend this with a database ping.
+ * Liveness probe, including a cheap database round-trip — the client's status
+ * pill should go red when the database is unreachable, not just when the
+ * process is down.
  */
-healthRouter.get('/', (_req, res) => {
-  res.json({
-    status: 'ok',
+healthRouter.get('/', async (_req, res) => {
+  let database: 'up' | 'down' = 'up';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    database = 'down';
+  }
+
+  res.status(database === 'up' ? 200 : 503).json({
+    status: database === 'up' ? 'ok' : 'degraded',
     service: 'mic-event-api',
-    message: 'MIC Event API is running',
-    version: '0.1.0',
+    message:
+      database === 'up' ? 'MIC Event API is running' : 'API is running but the database is unreachable',
+    database,
+    version: '0.2.0',
     environment: env.nodeEnv,
     uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),

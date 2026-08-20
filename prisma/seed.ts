@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 
 const prisma = new PrismaClient();
 
-const DEMO_PASSWORD = 'mic1234';
+const DEMO_PASSWORD = 'mic12345';
 
 function at(dayOffset: number, hour: number, minute = 0): Date {
   const d = new Date();

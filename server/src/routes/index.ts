@@ -1,16 +1,15 @@
 import { Router } from 'express';
 import { healthRouter } from './health.js';
+import { authRouter } from './auth.js';
 
 /**
- * Single place where every API route is mounted.
+ * Every API route is mounted here.
  *
- * CURRENT (milestone 1): only /api/health is implemented.
- *
- * FUTURE milestones will mount real routers here — auth, events,
- * registrations, check-ins, analytics and ai. They are deliberately NOT
- * stubbed out yet: an endpoint that exists but returns nothing is worse than
- * an endpoint that does not exist. See docs/API.md for the planned surface.
+ * Authorization lives inside each router (requireAuth / requireRole /
+ * ownership checks) rather than being layered on by path, so reading a handler
+ * tells you exactly who may call it.
  */
 export const apiRouter = Router();
 
 apiRouter.use('/health', healthRouter);
+apiRouter.use('/auth', authRouter);
