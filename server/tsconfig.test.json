@@ -1,0 +1,12 @@
+{
+  // Type-checks the tests too. The build (tsconfig.json) covers src only, so
+  // test files never end up in dist/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // rootDir widens to the package root because the tests sit beside src/.
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["src", "tests"]
+}

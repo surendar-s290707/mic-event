@@ -38,4 +38,14 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+
+  // Must come last: flat config lets later entries override earlier ones.
+  // Tests assert on arbitrary JSON responses, so `any` is the honest type for
+  // the generic HTTP client. Everything else in the server stays strict.
+  {
+    files: ['server/tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 );
