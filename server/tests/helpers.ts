@@ -1,6 +1,8 @@
 import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/lib/prisma.js';
+import { closeRealtime, initRealtime } from '../src/lib/realtime.js';
 
 /**
  * Integration-test helpers.
@@ -15,20 +17,25 @@ export interface TestServer {
   close: () => Promise<void>;
 }
 
-export async function startTestServer(): Promise<TestServer> {
+export async function startTestServer(options: { realtime?: boolean } = {}): Promise<TestServer> {
   const app = createApp();
+  const httpServer = createServer(app);
+  if (options.realtime) initRealtime(httpServer);
+
   const server: Server = await new Promise((resolve) => {
-    const s = app.listen(0, () => resolve(s));
+    httpServer.listen(0, () => resolve(httpServer));
   });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Could not bind a test port');
 
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
+    close: async () => {
+      if (options.realtime) await closeRealtime();
+      await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
-      ),
+      );
+    },
   };
 }
 

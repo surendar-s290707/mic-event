@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { getSocket, type LiveCheckIn } from '../../lib/socket';
 import { useAsync } from '../../lib/useAsync';
 import { formatTime, timeAgo } from '../../lib/format';
 import {
@@ -32,8 +33,11 @@ function buildBuckets(arrivals: string[], buckets = 8, minutesPerBucket = 15) {
   }));
 }
 
-/** How often the dashboard re-queries the database. */
-const REFRESH_MS = 10_000;
+/**
+ * Fallback polling interval, used only while the socket is disconnected —
+ * a blocked WebSocket should degrade to a slow dashboard, not a frozen one.
+ */
+const FALLBACK_REFRESH_MS = 15_000;
 
 export function EventDashboard() {
   const { id = '' } = useParams();
@@ -41,14 +45,46 @@ export function EventDashboard() {
   const eventRequest = useAsync(() => api.getEvent(id).then((r) => r.event), [id]);
   const statsRequest = useAsync(() => api.stats(id), [id]);
   const reloadStats = statsRequest.reload;
+  const [live, setLive] = useState(false);
+  const [lastArrival, setLastArrival] = useState<LiveCheckIn | null>(null);
 
-  // Interim live updates: poll the stats endpoint. Socket.IO replaces this in
-  // a later milestone — polling keeps a scan visible within ten seconds
-  // without holding a connection open per organizer.
+  /**
+   * Live updates. The server emits into a room for this event whenever a
+   * check-in commits; the dashboard treats that as "your numbers are stale"
+   * and re-reads /stats, so the socket never becomes a second, divergent way
+   * of computing the same figures.
+   */
   useEffect(() => {
-    const timer = setInterval(() => void reloadStats(), REFRESH_MS);
+    if (!id) return;
+    const socket = getSocket();
+
+    const join = () => socket.emit('join-event', id, (result: { ok: boolean }) => setLive(Boolean(result?.ok)));
+
+    const onCheckIn = (payload: LiveCheckIn) => {
+      if (payload.eventId !== id) return;
+      setLastArrival(payload);
+      void reloadStats();
+    };
+
+    if (socket.connected) join();
+    socket.on('connect', join);
+    socket.on('check-in', onCheckIn);
+    socket.on('disconnect', () => setLive(false));
+
+    return () => {
+      socket.emit('leave-event', id);
+      socket.off('connect', join);
+      socket.off('check-in', onCheckIn);
+    };
+  }, [id, reloadStats]);
+
+  // Safety net: if the socket is down (blocked proxy, server restart), fall
+  // back to slow polling rather than showing stale numbers forever.
+  useEffect(() => {
+    if (live) return;
+    const timer = setInterval(() => void reloadStats(), FALLBACK_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [reloadStats]);
+  }, [live, reloadStats]);
 
   if (eventRequest.loading || (statsRequest.loading && !statsRequest.data)) {
     return (
@@ -88,8 +124,18 @@ export function EventDashboard() {
           <p className="eyebrow">Live dashboard</p>
           <h1 style={{ fontSize: '1.8rem' }}>{event.name}</h1>
           <p className="muted">
-            {event.venue} · doors {formatTime(event.startsAt)} · updates every {REFRESH_MS / 1000}s
+            {event.venue} · doors {formatTime(event.startsAt)}
           </p>
+          <div className="row" style={{ gap: 8, marginTop: 4 }}>
+            <Badge tone={live ? 'success' : 'outline'} dot={live}>
+              {live ? 'Live' : 'Reconnecting…'}
+            </Badge>
+            {lastArrival && (
+              <span className="muted" style={{ fontSize: '0.84rem' }}>
+                {lastArrival.attendeeName} just walked in
+              </span>
+            )}
+          </div>
         </div>
         <div className="row">
           <Link to={`/organizer/events/${event.id}/scan`}>

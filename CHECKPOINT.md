@@ -24,18 +24,18 @@ reads and writes PostgreSQL through the API.
 | Scanner | ✅ | Real camera via `html5-qrcode`, cooldown, typed-code fallback |
 | Check-in | ✅ | Four verdicts; duplicates caught by a unique constraint |
 | Duplicate protection | ✅ | Insert-then-catch, verified with 12 simultaneous scans |
-| Event dashboard | ✅ | Live DB counts, recent check-ins, arrivals chart, 10s polling |
+| Event dashboard | ✅ | Live DB counts, recent check-ins, arrivals chart |
 | Attendee status | ✅ | Registered / Checked in, straight from the database |
 | CSV export | ✅ | Owner-only; name, email, registered at, status, timestamp |
 | Error handling | ✅ | Typed API errors; loading / empty / error states on every screen |
 | Offline scanning | ✅ | IndexedDB queue, auto-sync on reconnect, idempotent replay |
-| Tests | ✅ | 59 integration tests against a real database |
+| Live updates | ✅ | Socket.IO, authenticated, room per event, owner-only |
+| Tests | ✅ | 56 integration tests against a real database |
 
 ## Not implemented yet
 
 | Requirement | Milestone |
 | ----------- | --------- |
-| Socket.IO live dashboard (polling for now) | 3 |
 | Standalone 100+ concurrent request proof script + log | 3 |
 | Rotating / expiring QR tokens (currently long-lived opaque tokens) | 4 |
 | AI natural-language insights, server-side | 4 |
@@ -86,6 +86,18 @@ duplicate protection provable.
 The device clock is not trusted blindly: a `scannedAt` in the future or more than a day old is
 ignored in favour of server time.
 
+## Live dashboard
+
+Socket.IO shares the API's port. The handshake is authenticated with the same session cookie as the
+REST API, and `join-event` refuses any room the caller does not own — check-in names are
+organizer-only data, and a WebSocket must not become the way around that.
+
+A committed check-in emits into `event:<id>`; the dashboard treats that as "your numbers are stale"
+and re-reads `/stats`, so the socket never becomes a second, divergent way of computing the same
+figures. Duplicate scans emit nothing. If the socket is down (blocked proxy, server restart) the
+dashboard falls back to polling every 15 seconds rather than freezing, and shows
+"Reconnecting…" instead of "Live".
+
 ## Database
 
 Four tables. The constraints are the design:
@@ -124,7 +136,7 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 
 ## Verification performed
 
-**Automated** — `npm test`: 59 tests, 59 passing, 0 failing (~12s).
+**Automated** — `npm test`: 56 tests, 56 passing, 0 failing (~15s).
 
 - auth: signup, login, wrong password, logout, unauthenticated rejection, duplicate email, malformed
   input, bcrypt hash stored, no `passwordHash` in any response, tampered cookie rejected
@@ -138,6 +150,9 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
   8× concurrently) never makes a second check-in; A-syncs-after-B reports a duplicate and corrects
   the time backwards; the later queued scan leaves the time alone; invalid and wrong-event scans are
   judged identically to live ones; a bad device clock is ignored; ownership still enforced
+- live updates: a check-in reaches the watching organizer with nothing polling; offline-synced
+  check-ins push too; duplicates emit nothing; joining a room requires ownership; attendees and
+  sessionless sockets are refused; one event's check-ins never leak into another's room
 - concurrency: 20 simultaneous registrations on a capacity-3 event → exactly 3 rows; 12 simultaneous
   scans of one ticket → exactly 1 check-in row
 
@@ -159,7 +174,6 @@ Also checked: the API rejects `PORT`-less startup with a clear message, unknown 
    decode path was verified by decoding the generated QR with the same library. Point a real phone at
    a ticket before demoing.
 2. **QR tokens do not expire or rotate** — see the QR design note above.
-3. **The dashboard polls** every 10 seconds instead of using WebSockets.
 4. **No rate limiting** on login or signup; a determined attacker can guess passwords as fast as
    bcrypt allows (~10/second/core).
 5. **`npm run start:prod` sets `NODE_ENV` inline**, which does not work on Windows shells. Deployment
@@ -171,12 +185,5 @@ Also checked: the API rejects `PORT`-less startup with a clear message, unknown 
 
 ## Next milestone (3) — offline and live
 
-1. Offline scan queue in IndexedDB with a client-generated scan id; add `clientScanId` (unique,
-   nullable) to `CheckIn` so replaying a queued scan is idempotent.
-2. Sync endpoint that replays queued scans and reports per-scan outcomes, including the
-   scanned-offline-at-A-then-online-at-B case (keep the earliest check-in, report the later as a
-   duplicate rather than dropping it).
-3. Socket.IO room per event; emit after the check-in transaction commits; the dashboard subscribes
-   and the polling interval comes out.
 4. Standalone concurrency proof: a script firing 100+ simultaneous requests at **two** API processes
    sharing one database, with the output committed under `docs/`.

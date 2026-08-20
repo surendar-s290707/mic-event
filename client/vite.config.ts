@@ -23,6 +23,8 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api': { target: apiTarget, changeOrigin: true },
+        // ws: true forwards the WebSocket upgrade for live dashboard updates.
+        '/socket.io': { target: apiTarget, changeOrigin: true, ws: true },
       },
     },
     build: {

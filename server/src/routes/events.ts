@@ -9,6 +9,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { serializeEvent, serializeTicket } from '../lib/serialize.js';
 import { toCsv } from '../lib/csv.js';
 import { recordCheckIn } from '../lib/checkin.js';
+import { emitCheckIn } from '../lib/realtime.js';
 
 export const eventsRouter = Router();
 
@@ -289,6 +290,17 @@ eventsRouter.post(
     const input = parseBody(checkInSchema, req.body);
 
     const result = await recordCheckIn({ eventId: event.id, ...input });
+
+    // Only a genuinely new check-in is news; a duplicate changes nothing.
+    if (result.success && result.reason !== 'ALREADY_SYNCED') {
+      emitCheckIn({
+        eventId: event.id,
+        attendeeName: result.attendee?.name ?? 'Someone',
+        checkedInAt: result.checkedInAt ?? new Date().toISOString(),
+        stationId: input.stationId ?? null,
+      });
+    }
+
     res.json(result);
   }),
 );
@@ -315,6 +327,15 @@ eventsRouter.post(
     for (const scan of scans) {
       const result = await recordCheckIn({ eventId: event.id, ...scan });
       results.push({ clientScanId: scan.clientScanId, ...result });
+
+      if (result.success && result.reason !== 'ALREADY_SYNCED') {
+        emitCheckIn({
+          eventId: event.id,
+          attendeeName: result.attendee?.name ?? 'Someone',
+          checkedInAt: result.checkedInAt ?? new Date().toISOString(),
+          stationId: scan.stationId ?? null,
+        });
+      }
     }
 
     res.json({ results });
