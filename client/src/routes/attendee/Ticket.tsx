@@ -1,33 +1,33 @@
 import { Link, useParams } from 'react-router-dom';
-import { useApp } from '../../store/context';
+import { api } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { formatDay, formatTime } from '../../lib/format';
-import { Badge, Button, DevNote, ErrorState } from '../../components/ui';
-import { QrPlaceholder } from '../../components/QrPlaceholder';
+import { Badge, Button, ErrorState, LoadingState } from '../../components/ui';
+import { Qr } from '../../components/Qr';
 
 /**
- * The attendee's ticket. One QR per registration — never one shared code for
- * the whole event.
- *
- * CURRENT MOCK: the code below is a fixed, readable string and the QR is drawn,
- * not encoded.
- * FUTURE: the server issues a signed token that is either short-lived (the page
- * refreshes it while online) or single-use (invalidated the moment it is
- * scanned), which is what stops a screenshot being passed to a friend.
+ * The attendee's ticket: one QR per registration, never one code for the whole
+ * event. The QR holds only the opaque token the server issued — the API
+ * returns it to the owner of the registration and to nobody else.
  */
 export function Ticket() {
   const { id = '' } = useParams();
-  const { user, registrations, getEvent, isCheckedIn } = useApp();
+  const request = useAsync(() => api.getTicket(id).then((r) => r.ticket), [id]);
 
-  const registration = registrations.find((r) => r.id === id);
-  const event = registration ? getEvent(registration.eventId) : undefined;
-  const mine = registration?.attendeeId === user?.id;
+  if (request.loading) {
+    return (
+      <div className="page">
+        <LoadingState label="Loading your ticket…" />
+      </div>
+    );
+  }
 
-  if (!registration || !event || !mine) {
+  if (request.error || !request.data) {
     return (
       <div className="page">
         <ErrorState
           title="We couldn’t find that ticket"
-          body="It may belong to another account, or the event was removed."
+          body={request.error?.message ?? 'It may belong to another account, or the event was removed.'}
           action={
             <Link to="/attendee">
               <Button>Back to my events</Button>
@@ -38,7 +38,8 @@ export function Ticket() {
     );
   }
 
-  const checkedIn = isCheckedIn(registration.id);
+  const ticket = request.data;
+  const { event } = ticket;
 
   return (
     <div className="page" style={{ maxWidth: 520 }}>
@@ -52,9 +53,9 @@ export function Ticket() {
       <div className="ticket">
         <div className="ticket__head">
           <div className="spread">
-            <strong>{user?.name}</strong>
-            <Badge tone={checkedIn ? 'success' : 'accent'} dot={checkedIn}>
-              {checkedIn ? 'Checked in' : 'Registered'}
+            <strong>{ticket.attendee.name}</strong>
+            <Badge tone={ticket.checkedIn ? 'success' : 'accent'} dot={ticket.checkedIn}>
+              {ticket.checkedIn ? 'Checked in' : 'Registered'}
             </Badge>
           </div>
           <span className="muted" style={{ fontSize: '0.9rem' }}>
@@ -64,12 +65,16 @@ export function Ticket() {
 
         <div className="ticket__qr">
           <div className="ticket__qrframe">
-            <QrPlaceholder value={registration.ticketCode} size={200} />
+            <Qr value={ticket.qrToken} size={200} />
           </div>
           <strong style={{ fontSize: '1rem' }}>
-            {checkedIn ? 'You’re already inside' : 'Show this at the entrance.'}
+            {ticket.checkedIn ? 'You’re already inside' : 'Show this at the entrance.'}
           </strong>
-          <span className="mono muted">{registration.ticketCode}</span>
+          <span className="muted" style={{ fontSize: '0.8rem' }}>
+            {ticket.checkedIn
+              ? `Scanned at ${formatTime(ticket.checkedInAt!)}`
+              : 'One scan, one entry.'}
+          </span>
         </div>
 
         <div className="ticket__foot">
@@ -90,7 +95,7 @@ export function Ticket() {
             </div>
             <div className="ticket__row">
               <dt>Status</dt>
-              <dd>{checkedIn ? 'Checked in' : 'Registered'}</dd>
+              <dd>{ticket.checkedIn ? 'Checked in' : 'Registered'}</dd>
             </div>
           </dl>
 
@@ -100,13 +105,6 @@ export function Ticket() {
             </Button>
           </Link>
         </div>
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <DevNote>
-          Placeholder QR. The real one carries a server-signed token that expires, so a screenshot
-          sent to a friend stops working.
-        </DevNote>
       </div>
     </div>
   );

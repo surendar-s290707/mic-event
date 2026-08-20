@@ -1,21 +1,42 @@
 import { Link } from 'react-router-dom';
-import { useApp } from '../../store/context';
+import { useSession } from '../../store/session';
+import { api } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { eventStatus, formatDay, formatTime, greeting } from '../../lib/format';
-import { Badge, Button, Card, EmptyState } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState } from '../../components/ui';
 import { EventCard } from '../../components/EventCard';
 
 export function AttendeeHome() {
-  const { user, events, getStats, getMyRegistration, isCheckedIn } = useApp();
+  const { user } = useSession();
+  const events = useAsync(() => api.listEvents().then((r) => r.events), []);
 
-  const upcoming = events
+  if (events.loading) {
+    return (
+      <div className="page">
+        <LoadingState label="Loading events…" />
+      </div>
+    );
+  }
+
+  if (events.error) {
+    return (
+      <div className="page">
+        <ErrorState
+          title="We couldn’t load events"
+          body={events.error.message}
+          action={<Button onClick={events.reload}>Try again</Button>}
+        />
+      </div>
+    );
+  }
+
+  const upcoming = (events.data ?? [])
     .filter((event) => eventStatus(event) !== 'ended')
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
-  const registered = upcoming.filter((event) => getMyRegistration(event.id));
-  const discover = upcoming.filter((event) => !getMyRegistration(event.id));
+  const registered = upcoming.filter((event) => event.myRegistration);
+  const discover = upcoming.filter((event) => !event.myRegistration);
   const next = registered[0];
-  const nextRegistration = next ? getMyRegistration(next.id) : undefined;
-  const nextCheckedIn = nextRegistration ? isCheckedIn(nextRegistration.id) : false;
 
   return (
     <div className="page">
@@ -30,7 +51,7 @@ export function AttendeeHome() {
         </div>
       </div>
 
-      {next && nextRegistration && (
+      {next && next.myRegistration && (
         <Card>
           <div className="feature">
             <div className="spread">
@@ -38,8 +59,8 @@ export function AttendeeHome() {
                 <p className="eyebrow">Your next event</p>
                 <h2 style={{ marginTop: 4 }}>{next.name}</h2>
               </div>
-              <Badge tone={nextCheckedIn ? 'success' : 'accent'}>
-                {nextCheckedIn ? 'Checked in' : 'Registered'}
+              <Badge tone={next.myRegistration.checkedIn ? 'success' : 'accent'}>
+                {next.myRegistration.checkedIn ? 'Checked in' : 'Registered'}
               </Badge>
             </div>
 
@@ -52,7 +73,7 @@ export function AttendeeHome() {
             </div>
 
             <div className="feature__actions">
-              <Link to={`/attendee/ticket/${nextRegistration.id}`}>
+              <Link to={`/attendee/ticket/${next.myRegistration.id}`}>
                 <Button variant="primary">My ticket</Button>
               </Link>
               <Link to={`/attendee/events/${next.id}`}>
@@ -71,36 +92,28 @@ export function AttendeeHome() {
           </span>
         </div>
         {registered.length === 0 ? (
-          <EmptyState
-            title="No tickets yet"
-            body="Register for something below and your QR shows up here."
-          />
+          <EmptyState title="No tickets yet" body="Register for something below and your QR shows up here." />
         ) : (
           <div className="cardgrid">
-            {registered.map((event) => {
-              const registration = getMyRegistration(event.id)!;
-              const checkedIn = isCheckedIn(registration.id);
-              return (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  stats={getStats(event.id)}
-                  to={`/attendee/events/${event.id}`}
-                  rightSlot={
-                    <Badge tone={checkedIn ? 'success' : 'accent'}>
-                      {checkedIn ? 'Checked in' : 'Registered'}
-                    </Badge>
-                  }
-                  footer={
-                    <Link to={`/attendee/ticket/${registration.id}`}>
-                      <Button size="sm" variant="primary">
-                        My ticket
-                      </Button>
-                    </Link>
-                  }
-                />
-              );
-            })}
+            {registered.map((event) => (
+              <EventCard
+                key={event.id}
+                event={event}
+                to={`/attendee/events/${event.id}`}
+                rightSlot={
+                  <Badge tone={event.myRegistration!.checkedIn ? 'success' : 'accent'}>
+                    {event.myRegistration!.checkedIn ? 'Checked in' : 'Registered'}
+                  </Badge>
+                }
+                footer={
+                  <Link to={`/attendee/ticket/${event.myRegistration!.id}`}>
+                    <Button size="sm" variant="primary">
+                      My ticket
+                    </Button>
+                  </Link>
+                }
+              />
+            ))}
           </div>
         )}
       </section>
@@ -116,24 +129,20 @@ export function AttendeeHome() {
           <EmptyState title="Nothing new right now" body="Check back when the clubs post their next thing." />
         ) : (
           <div className="cardgrid">
-            {discover.slice(0, 3).map((event) => {
-              const stats = getStats(event.id);
-              return (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  stats={stats}
-                  to={`/attendee/events/${event.id}`}
-                  footer={
-                    <Link to={`/attendee/events/${event.id}`}>
-                      <Button size="sm" disabled={stats.spotsLeft === 0}>
-                        {stats.spotsLeft === 0 ? 'Full' : 'Register'}
-                      </Button>
-                    </Link>
-                  }
-                />
-              );
-            })}
+            {discover.slice(0, 3).map((event) => (
+              <EventCard
+                key={event.id}
+                event={event}
+                to={`/attendee/events/${event.id}`}
+                footer={
+                  <Link to={`/attendee/events/${event.id}`}>
+                    <Button size="sm" disabled={event.spotsLeft === 0}>
+                      {event.spotsLeft === 0 ? 'Full' : 'Register'}
+                    </Button>
+                  </Link>
+                }
+              />
+            ))}
           </div>
         )}
       </section>

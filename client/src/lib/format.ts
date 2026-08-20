@@ -1,4 +1,4 @@
-import type { EventItem, EventStatus } from './types';
+import type { EventStatus } from './types';
 
 const dayFmt = new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 const timeFmt = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -55,7 +55,7 @@ export function greeting(now = new Date()): string {
 }
 
 /** Status is always derived from the event's own times, never stored. */
-export function eventStatus(event: EventItem): EventStatus {
+export function eventStatus(event: { startsAt: string; endsAt: string }): EventStatus {
   const now = Date.now();
   if (now < new Date(event.startsAt).getTime()) return 'upcoming';
   if (now <= new Date(event.endsAt).getTime()) return 'live';

@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { AppProvider } from './store/AppStore';
+import { SessionProvider } from './store/SessionProvider';
 import { App } from './App';
 import './styles/index.css';
 
@@ -11,9 +11,9 @@ if (!container) throw new Error('#root element is missing from index.html');
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
-      <AppProvider>
+      <SessionProvider>
         <App />
-      </AppProvider>
+      </SessionProvider>
     </BrowserRouter>
   </StrictMode>,
 );

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getHealth, type HealthResponse } from '../lib/api';
+import { api, type HealthResponse } from '../lib/api';
 
-type Status = 'checking' | 'online' | 'offline';
+type Status = 'checking' | 'online' | 'offline' | 'degraded';
 
 /**
- * Unobtrusive development indicator: does the browser actually reach the
- * Express server? It re-checks every 20s so starting the API is visible
- * without a page reload.
+ * Unobtrusive status indicator: can the browser reach the API, and can the API
+ * reach its database? It re-checks every 20s, so starting the server or the
+ * database becomes visible without a page reload.
  */
 export function ApiStatus() {
   const [status, setStatus] = useState<Status>('checking');
@@ -17,10 +17,10 @@ export function ApiStatus() {
 
     async function check() {
       try {
-        const result = await getHealth();
+        const result = await api.health();
         if (cancelled) return;
         setHealth(result);
-        setStatus(result.status === 'ok' ? 'online' : 'offline');
+        setStatus(result.database === 'up' ? 'online' : 'degraded');
       } catch {
         if (cancelled) return;
         setHealth(null);
@@ -36,16 +36,30 @@ export function ApiStatus() {
     };
   }, []);
 
-  const label = status === 'online' ? 'API online' : status === 'offline' ? 'API offline' : 'Checking API';
+  const label =
+    status === 'online'
+      ? 'API online'
+      : status === 'degraded'
+        ? 'No database'
+        : status === 'offline'
+          ? 'API offline'
+          : 'Checking API';
+
   const title =
     status === 'online' && health
-      ? `${health.service} v${health.version} · ${health.environment} · up ${health.uptimeSeconds}s`
-      : status === 'offline'
-        ? 'Cannot reach /api/health — start the server with: npm run server'
-        : 'Contacting /api/health…';
+      ? `${health.service} v${health.version} · ${health.environment} · database up`
+      : status === 'degraded'
+        ? 'The API is running but cannot reach PostgreSQL. Try: npm run db:up'
+        : status === 'offline'
+          ? 'Cannot reach /api/health — start the server with: npm run server'
+          : 'Contacting /api/health…';
 
   return (
-    <span className={`apistatus apistatus--${status}`} title={title} aria-live="polite">
+    <span
+      className={`apistatus apistatus--${status === 'degraded' ? 'checking' : status}`}
+      title={title}
+      aria-live="polite"
+    >
       <span className="apistatus__dot" aria-hidden="true" />
       <span className="apistatus__text">{label}</span>
     </span>

@@ -1,21 +1,29 @@
+import { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useApp } from '../../store/context';
-import type { CheckIn } from '../../lib/types';
+import { api } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { formatTime, timeAgo } from '../../lib/format';
-import { Badge, Button, Card, DevNote, EmptyState, ErrorState, Progress, Stat } from '../../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  Progress,
+  Stat,
+} from '../../components/ui';
 
-/** Groups check-ins into 15-minute buckets for the little CSS bar chart. */
-function buildBuckets(checkIns: CheckIn[], buckets = 8, minutesPerBucket = 15) {
+/** Groups arrival timestamps into 15-minute buckets for the CSS bar chart. */
+function buildBuckets(arrivals: string[], buckets = 8, minutesPerBucket = 15) {
   const now = Date.now();
-  const windowMs = buckets * minutesPerBucket * 60_000;
-  const start = now - windowMs;
+  const start = now - buckets * minutesPerBucket * 60_000;
 
   const counts = new Array(buckets).fill(0) as number[];
-  for (const checkIn of checkIns) {
-    const time = new Date(checkIn.checkedInAt).getTime();
+  for (const iso of arrivals) {
+    const time = new Date(iso).getTime();
     if (time < start || time > now) continue;
-    const index = Math.min(buckets - 1, Math.floor((time - start) / (minutesPerBucket * 60_000)));
-    counts[index] += 1;
+    counts[Math.min(buckets - 1, Math.floor((time - start) / (minutesPerBucket * 60_000)))] += 1;
   }
 
   return counts.map((count, index) => ({
@@ -24,17 +32,39 @@ function buildBuckets(checkIns: CheckIn[], buckets = 8, minutesPerBucket = 15) {
   }));
 }
 
+/** How often the dashboard re-queries the database. */
+const REFRESH_MS = 10_000;
+
 export function EventDashboard() {
   const { id = '' } = useParams();
-  const { getEvent, getStats, getCheckInsFor } = useApp();
 
-  const event = getEvent(id);
-  if (!event) {
+  const eventRequest = useAsync(() => api.getEvent(id).then((r) => r.event), [id]);
+  const statsRequest = useAsync(() => api.stats(id), [id]);
+  const reloadStats = statsRequest.reload;
+
+  // Interim live updates: poll the stats endpoint. Socket.IO replaces this in
+  // a later milestone — polling keeps a scan visible within ten seconds
+  // without holding a connection open per organizer.
+  useEffect(() => {
+    const timer = setInterval(() => void reloadStats(), REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [reloadStats]);
+
+  if (eventRequest.loading || (statsRequest.loading && !statsRequest.data)) {
+    return (
+      <div className="page">
+        <LoadingState label="Loading dashboard…" />
+      </div>
+    );
+  }
+
+  const error = eventRequest.error ?? statsRequest.error;
+  if (error || !eventRequest.data) {
     return (
       <div className="page">
         <ErrorState
-          title="We couldn’t find that event"
-          body="Open the event from your dashboard and try again."
+          title={error?.status === 403 ? 'That event isn’t yours' : 'We couldn’t load the dashboard'}
+          body={error?.message ?? 'Open the event from your dashboard and try again.'}
           action={
             <Link to="/organizer/events">
               <Button>Back to events</Button>
@@ -45,9 +75,10 @@ export function EventDashboard() {
     );
   }
 
-  const stats = getStats(event.id);
-  const checkIns = getCheckInsFor(event.id);
-  const buckets = buildBuckets(checkIns);
+  const event = eventRequest.data;
+  const stats = statsRequest.data?.stats;
+  const checkIns = statsRequest.data?.recentCheckIns ?? [];
+  const buckets = buildBuckets(statsRequest.data?.arrivals ?? []);
   const peak = Math.max(1, ...buckets.map((b) => b.count));
 
   return (
@@ -57,13 +88,16 @@ export function EventDashboard() {
           <p className="eyebrow">Live dashboard</p>
           <h1 style={{ fontSize: '1.8rem' }}>{event.name}</h1>
           <p className="muted">
-            {event.venue} · doors {formatTime(event.startsAt)}
+            {event.venue} · doors {formatTime(event.startsAt)} · updates every {REFRESH_MS / 1000}s
           </p>
         </div>
         <div className="row">
           <Link to={`/organizer/events/${event.id}/scan`}>
             <Button variant="primary">Scan QR</Button>
           </Link>
+          <a href={api.exportUrl(event.id)} download>
+            <Button>Export CSV</Button>
+          </a>
           <Link to={`/organizer/events/${event.id}`}>
             <Button variant="ghost">Event page</Button>
           </Link>
@@ -74,10 +108,10 @@ export function EventDashboard() {
         <div className="stack" style={{ gap: 20 }}>
           <Card>
             <div className="stat-grid">
-              <Stat value={stats.registered} label="Registered" />
-              <Stat value={stats.checkedIn} label="Checked in" />
-              <Stat value={stats.spotsLeft} label="Spots left" />
-              <Stat value={`${stats.attendancePercent}%`} label="Turnout" />
+              <Stat value={stats?.registeredCount ?? 0} label="Registered" />
+              <Stat value={stats?.checkedInCount ?? 0} label="Checked in" />
+              <Stat value={stats?.spotsLeft ?? 0} label="Spots left" />
+              <Stat value={`${stats?.attendancePercent ?? 0}%`} label="Turnout" />
             </div>
             <div className="stack" style={{ gap: 8, marginTop: 20 }}>
               <div className="spread">
@@ -85,10 +119,14 @@ export function EventDashboard() {
                   Attendance
                 </span>
                 <span className="muted" style={{ fontSize: '0.88rem' }}>
-                  {stats.checkedIn} of {stats.registered} registered
+                  {stats?.checkedInCount ?? 0} of {stats?.registeredCount ?? 0} registered
                 </span>
               </div>
-              <Progress value={stats.checkedIn} max={stats.registered} complete={stats.checkedIn === stats.registered} />
+              <Progress
+                value={stats?.checkedInCount ?? 0}
+                max={stats?.registeredCount ?? 0}
+                complete={Boolean(stats && stats.checkedInCount === stats.registeredCount)}
+              />
             </div>
           </Card>
 
@@ -119,34 +157,27 @@ export function EventDashboard() {
           <div className="spread" style={{ marginBottom: 12 }}>
             <h3>Checked in</h3>
             <Badge tone="success" dot>
-              {checkIns.length}
+              {stats?.checkedInCount ?? 0}
             </Badge>
           </div>
           {checkIns.length === 0 ? (
             <EmptyState title="Nobody scanned in yet" body="Names appear here as people come through the door." />
           ) : (
             <div className="list" style={{ maxHeight: 420, overflowY: 'auto' }}>
-              {checkIns.slice(0, 25).map((checkIn) => (
+              {checkIns.map((checkIn) => (
                 <div className="list__row" key={checkIn.id}>
                   <div className="list__main">
-                    <div className="list__name">{checkIn.attendeeName}</div>
+                    <div className="list__name">{checkIn.name}</div>
                     <div className="list__meta">
                       {formatTime(checkIn.checkedInAt)} · {timeAgo(checkIn.checkedInAt)}
                     </div>
                   </div>
-                  {checkIn.method !== 'SCAN' && <Badge tone="outline">{checkIn.method.toLowerCase()}</Badge>}
+                  {checkIn.stationId && <Badge tone="outline">{checkIn.stationId}</Badge>}
                 </div>
               ))}
             </div>
           )}
         </Card>
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <DevNote>
-          This page re-renders from local state. With the real backend it subscribes to a Socket.IO
-          room for the event, so every scanner updates it without a refresh.
-        </DevNote>
       </div>
     </div>
   );

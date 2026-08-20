@@ -499,6 +499,19 @@
   place-items: center;
   overflow: hidden;
 }
+.scanner__camera {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.scanner__camera video,
+.scanner__camera img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
 .scanner__frame {
   position: absolute;
   inset: 14%;

@@ -1,26 +1,39 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApp } from '../../store/context';
+import { ApiError, api } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
 import { eventStatus } from '../../lib/format';
-import { Badge, Banner, Button, EmptyState } from '../../components/ui';
+import { Badge, Banner, Button, EmptyState, ErrorState, LoadingState } from '../../components/ui';
 import { EventCard } from '../../components/EventCard';
 
 export function AttendeeEvents() {
-  const { events, getStats, getMyRegistration, isCheckedIn, registerForEvent } = useApp();
+  const events = useAsync(() => api.listEvents().then((r) => r.events), []);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'warn'; text: string } | null>(null);
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
 
-  const upcoming = events
+  async function onRegister(eventId: string, eventName: string) {
+    setRegisteringId(eventId);
+    setNotice(null);
+    try {
+      await api.register(eventId);
+      await events.reload();
+      setNotice({ tone: 'success', text: `You’re in for ${eventName}. Your ticket is ready.` });
+    } catch (error) {
+      const code = error instanceof ApiError ? error.code : 'error';
+      setNotice({
+        tone: code === 'already_registered' ? 'warn' : 'error',
+        text: error instanceof Error ? error.message : 'We couldn’t register you.',
+      });
+      // Someone else may have taken the last seat — show the real numbers.
+      await events.reload();
+    } finally {
+      setRegisteringId(null);
+    }
+  }
+
+  const upcoming = (events.data ?? [])
     .filter((event) => eventStatus(event) !== 'ended')
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-
-  function onRegister(eventId: string, eventName: string) {
-    const result = registerForEvent(eventId);
-    if (result.ok) setNotice({ tone: 'success', text: `You’re in for ${eventName}. Your ticket is ready.` });
-    else if (result.reason === 'event_full') setNotice({ tone: 'error', text: 'That one just filled up.' });
-    else if (result.reason === 'already_registered')
-      setNotice({ tone: 'warn', text: 'You’re already registered for that.' });
-    else setNotice({ tone: 'error', text: 'Log in as an attendee to register.' });
-  }
 
   return (
     <div className="page">
@@ -37,30 +50,34 @@ export function AttendeeEvents() {
         </div>
       )}
 
-      {upcoming.length === 0 ? (
+      {events.loading ? (
+        <LoadingState label="Loading events…" />
+      ) : events.error ? (
+        <ErrorState
+          title="We couldn’t load events"
+          body={events.error.message}
+          action={<Button onClick={events.reload}>Try again</Button>}
+        />
+      ) : upcoming.length === 0 ? (
         <EmptyState title="No events scheduled" body="When a club posts something new it shows up here." />
       ) : (
         <div className="cardgrid">
           {upcoming.map((event) => {
-            const stats = getStats(event.id);
-            const registration = getMyRegistration(event.id);
-            const checkedIn = registration ? isCheckedIn(registration.id) : false;
-
+            const registration = event.myRegistration;
             return (
               <EventCard
                 key={event.id}
                 event={event}
-                stats={stats}
                 to={`/attendee/events/${event.id}`}
                 rightSlot={
                   registration ? (
-                    <Badge tone={checkedIn ? 'success' : 'accent'}>
-                      {checkedIn ? 'Checked in' : 'Registered'}
+                    <Badge tone={registration.checkedIn ? 'success' : 'accent'}>
+                      {registration.checkedIn ? 'Checked in' : 'Registered'}
                     </Badge>
-                  ) : stats.spotsLeft === 0 ? (
+                  ) : event.spotsLeft === 0 ? (
                     <Badge tone="danger">Full</Badge>
                   ) : (
-                    <Badge tone="outline">{stats.spotsLeft} seats left</Badge>
+                    <Badge tone="outline">{event.spotsLeft} seats left</Badge>
                   )
                 }
                 footer={
@@ -74,10 +91,11 @@ export function AttendeeEvents() {
                     <Button
                       size="sm"
                       variant="primary"
-                      disabled={stats.spotsLeft === 0}
+                      loading={registeringId === event.id}
+                      disabled={event.spotsLeft === 0}
                       onClick={() => onRegister(event.id, event.name)}
                     >
-                      {stats.spotsLeft === 0 ? 'Full' : 'Register'}
+                      {event.spotsLeft === 0 ? 'Full' : 'Register'}
                     </Button>
                   )
                 }

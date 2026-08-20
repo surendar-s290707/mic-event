@@ -1,59 +1,58 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
-import { useApp } from '../store/context';
-import { demoCredentials } from '../mock/data';
-import type { Role } from '../lib/types';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useSession } from '../store/session';
+import { ApiError } from '../lib/api';
 import { Banner, Button, Card, Field, Input } from '../components/ui';
 
-interface FieldErrors {
-  email?: string;
-  password?: string;
-}
-
-function validate(email: string, password: string): FieldErrors {
-  const errors: FieldErrors = {};
-  if (!email.trim()) errors.email = 'Enter your email';
-  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'That doesn’t look like an email';
-  if (!password) errors.password = 'Enter your password';
-  return errors;
-}
+const DEMO = {
+  organizer: { email: 'aditi@mic.dev', password: 'mic12345' },
+  attendee: { email: 'sneha@student.mic.dev', password: 'mic12345' },
+};
 
 export function Login() {
-  const { user, signIn } = useApp();
+  const { user, status, signIn } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [role, setRole] = useState<Role>('ORGANIZER');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (user) return <Navigate to={user.role === 'ORGANIZER' ? '/organizer' : '/attendee'} replace />;
+  const from = (location.state as { from?: string } | null)?.from;
+
+  if (status === 'ready' && user) {
+    return <Navigate to={from ?? (user.role === 'ORGANIZER' ? '/organizer' : '/attendee')} replace />;
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
 
-    const nextErrors = validate(email, password);
+    const nextErrors: { email?: string; password?: string } = {};
+    if (!email.trim()) nextErrors.email = 'Enter your email';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      nextErrors.email = 'That doesn’t look like an email';
+    if (!password) nextErrors.password = 'Enter your password';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
     setSubmitting(true);
     try {
-      const account = await signIn(email, password, role);
-      navigate(account.role === 'ORGANIZER' ? '/organizer' : '/attendee', { replace: true });
+      const account = await signIn(email.trim(), password);
+      navigate(from ?? (account.role === 'ORGANIZER' ? '/organizer' : '/attendee'), { replace: true });
     } catch (error) {
+      if (error instanceof ApiError && error.details) setErrors(error.details);
       setFormError(error instanceof Error ? error.message : 'Could not sign you in');
     } finally {
       setSubmitting(false);
     }
   }
 
-  function useDemoAccount() {
-    const demo = demoCredentials[role];
-    setEmail(demo.email);
-    setPassword(demo.password);
+  function fillDemo(which: keyof typeof DEMO) {
+    setEmail(DEMO[which].email);
+    setPassword(DEMO[which].password);
     setErrors({});
     setFormError(null);
   }
@@ -70,30 +69,6 @@ export function Login() {
 
         <Card>
           <form className="stack" onSubmit={onSubmit} noValidate>
-            <div className="field">
-              <span className="field__label">I’m here as</span>
-              <div className="segmented" role="group" aria-label="Choose your role">
-                <button
-                  type="button"
-                  className="segmented__option"
-                  aria-pressed={role === 'ORGANIZER'}
-                  onClick={() => setRole('ORGANIZER')}
-                >
-                  Organizer
-                  <span className="segmented__note">Create & scan</span>
-                </button>
-                <button
-                  type="button"
-                  className="segmented__option"
-                  aria-pressed={role === 'ATTENDEE'}
-                  onClick={() => setRole('ATTENDEE')}
-                >
-                  Attendee
-                  <span className="segmented__note">Register & attend</span>
-                </button>
-              </div>
-            </div>
-
             <Field label="Email" htmlFor="email" error={errors.email}>
               <Input
                 id="email"
@@ -125,27 +100,25 @@ export function Login() {
             </Button>
           </form>
 
-          {/* Development-mode hint. Removed once real auth lands. */}
+          {/* Seeded demo accounts — see prisma/seed.ts. */}
           <div className="demo-hint">
-            <div className="spread" style={{ marginBottom: 6 }}>
-              <strong>Demo login</strong>
-              <Button size="sm" onClick={useDemoAccount} type="button">
-                Fill for me
+            <div className="spread" style={{ marginBottom: 8 }}>
+              <strong>Demo accounts</strong>
+              <span className="muted">password: mic12345</span>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <Button size="sm" type="button" onClick={() => fillDemo('organizer')}>
+                Organizer
               </Button>
-            </div>
-            <div className="demo-hint__row">
-              <span className="muted">Email</span>
-              <span className="mono">{demoCredentials[role].email}</span>
-            </div>
-            <div className="demo-hint__row">
-              <span className="muted">Password</span>
-              <span className="mono">{demoCredentials[role].password}</span>
+              <Button size="sm" type="button" onClick={() => fillDemo('attendee')}>
+                Attendee
+              </Button>
             </div>
           </div>
         </Card>
 
         <p className="auth__foot">
-          Mock sign-in for development — no accounts, passwords or tokens are stored yet.
+          New here? <Link to="/signup" style={{ textDecoration: 'underline' }}>Create an account</Link>
         </p>
       </div>
     </div>

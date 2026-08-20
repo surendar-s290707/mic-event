@@ -1,43 +1,146 @@
-import { useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useApp } from '../../store/context';
-import type { CheckInResultData } from '../../lib/types';
+import { Html5Qrcode } from 'html5-qrcode';
+import { ApiError, api } from '../../lib/api';
+import { useAsync } from '../../lib/useAsync';
+import { getStationId } from '../../lib/station';
+import type { ScanResult } from '../../lib/types';
 import { formatTime, timeAgo } from '../../lib/format';
-import { Badge, Button, Card, DevNote, ErrorState, Input } from '../../components/ui';
+import { Badge, Banner, Button, Card, ErrorState, Input, LoadingState } from '../../components/ui';
 import { CheckInResult } from '../../components/CheckInResult';
 
+/** Element the camera stream is mounted into. */
+const VIEWPORT_ID = 'qr-viewport';
+
 /**
- * ===========================================================================
- * CURRENT MOCK FUNCTIONALITY — the camera is a drawing.
- * ===========================================================================
- * Scans are triggered by the buttons below or by typing a ticket code, and
- * they resolve against in-memory data.
- *
- * FUTURE REAL IMPLEMENTATION
- * `html5-qrcode` mounts into the <div id="qr-viewport"> element below and
- * calls the same handleScan() with the decoded string, so nothing else on
- * this screen changes. handleScan then POSTs to /api/check-ins, where a
- * unique constraint — not this component — is what actually prevents a
- * duplicate check-in. The offline toggle becomes a real navigator.onLine
- * listener with an IndexedDB queue.
+ * A camera pointed at a QR fires the decode callback many times a second while
+ * the code stays in frame. Without this window the same ticket would be POSTed
+ * dozens of times and every scan after the first would come back as a
+ * duplicate. The check-in endpoint is safe either way — this is about not
+ * shouting "already checked in" at someone who just walked in.
  */
+const SAME_CODE_COOLDOWN_MS = 4000;
+
 export function ScanPage() {
   const { id = '' } = useParams();
-  const { getEvent, getStats, checkInByTicketCode, sampleTicketCodes } = useApp();
+  const eventRequest = useAsync(() => api.getEvent(id).then((r) => r.event), [id]);
 
-  const [result, setResult] = useState<CheckInResultData | null>(null);
-  const [recent, setRecent] = useState<{ result: CheckInResultData; at: string }[]>([]);
+  const [result, setResult] = useState<ScanResult | null>(null);
+  const [recent, setRecent] = useState<{ result: ScanResult; at: string }[]>([]);
   const [manualCode, setManualCode] = useState('');
-  const [offline, setOffline] = useState(false);
-  const [scanning, setScanning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [cameraState, setCameraState] = useState<'idle' | 'starting' | 'running' | 'error'>('idle');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [checkedInCount, setCheckedInCount] = useState<number | null>(null);
 
-  const event = getEvent(id);
-  if (!event) {
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const lastScanRef = useRef<{ token: string; at: number } | null>(null);
+  const inFlightRef = useRef(false);
+
+  const submitToken = useCallback(
+    async (token: string) => {
+      if (!token || inFlightRef.current) return;
+      inFlightRef.current = true;
+      setSubmitting(true);
+      try {
+        const scan = await api.checkIn(id, token, getStationId());
+        setResult(scan);
+        setRecent((prev) => [{ result: scan, at: new Date().toISOString() }, ...prev].slice(0, 8));
+        if (scan.success) setCheckedInCount((count) => (count === null ? null : count + 1));
+      } catch (error) {
+        // A failed request is not a scan verdict — say so plainly.
+        setResult(null);
+        setCameraError(
+          error instanceof ApiError
+            ? error.message
+            : 'We couldn’t reach the server to record that scan.',
+        );
+      } finally {
+        inFlightRef.current = false;
+        setSubmitting(false);
+      }
+    },
+    [id],
+  );
+
+  const onDecoded = useCallback(
+    (decoded: string) => {
+      const token = decoded.trim();
+      const last = lastScanRef.current;
+      if (last && last.token === token && Date.now() - last.at < SAME_CODE_COOLDOWN_MS) return;
+      lastScanRef.current = { token, at: Date.now() };
+      void submitToken(token);
+    },
+    [submitToken],
+  );
+
+  const startCamera = useCallback(async () => {
+    setCameraState('starting');
+    setCameraError(null);
+    try {
+      const scanner = new Html5Qrcode(VIEWPORT_ID, { verbose: false });
+      scannerRef.current = scanner;
+      await scanner.start(
+        { facingMode: 'environment' }, // rear camera on a phone
+        { fps: 10, qrbox: { width: 240, height: 240 } },
+        onDecoded,
+        undefined, // per-frame decode failures are normal; ignore them
+      );
+      setCameraState('running');
+    } catch (error) {
+      scannerRef.current = null;
+      setCameraState('error');
+      setCameraError(
+        error instanceof Error && /permission|denied|NotAllowed/i.test(error.message)
+          ? 'Camera access was blocked. Allow it in your browser, or type the ticket code below.'
+          : 'We couldn’t start the camera on this device. You can still type the ticket code below.',
+      );
+    }
+  }, [onDecoded]);
+
+  // Always release the camera when leaving the screen.
+  useEffect(() => {
+    return () => {
+      const scanner = scannerRef.current;
+      if (!scanner) return;
+      scanner
+        .stop()
+        .then(() => scanner.clear())
+        .catch(() => {
+          /* already stopped */
+        });
+      scannerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (eventRequest.data && checkedInCount === null) {
+      setCheckedInCount(eventRequest.data.checkedInCount ?? 0);
+    }
+  }, [eventRequest.data, checkedInCount]);
+
+  function onManualSubmit(e: FormEvent) {
+    e.preventDefault();
+    const code = manualCode.trim();
+    setManualCode('');
+    lastScanRef.current = null; // typed codes are always deliberate
+    void submitToken(code);
+  }
+
+  if (eventRequest.loading) {
+    return (
+      <div className="page">
+        <LoadingState label="Loading event…" />
+      </div>
+    );
+  }
+
+  if (eventRequest.error || !eventRequest.data) {
     return (
       <div className="page">
         <ErrorState
-          title="We couldn’t find that event"
-          body="Open the event from your dashboard and try again."
+          title={eventRequest.error?.status === 403 ? 'That event isn’t yours' : 'We couldn’t find that event'}
+          body={eventRequest.error?.message ?? 'Open the event from your dashboard and try again.'}
           action={
             <Link to="/organizer/events">
               <Button>Back to events</Button>
@@ -48,26 +151,7 @@ export function ScanPage() {
     );
   }
 
-  const stats = getStats(event.id);
-  const samples = sampleTicketCodes(event.id);
-
-  function handleScan(code: string) {
-    if (!code) return;
-    setScanning(true);
-    // Small delay so the success/duplicate states are visible, like a real scan.
-    setTimeout(() => {
-      const outcome = checkInByTicketCode(code, event!.id, { offline });
-      setResult(outcome);
-      setRecent((prev) => [{ result: outcome, at: new Date().toISOString() }, ...prev].slice(0, 6));
-      setScanning(false);
-    }, 350);
-  }
-
-  function onManualSubmit(e: FormEvent) {
-    e.preventDefault();
-    handleScan(manualCode.trim());
-    setManualCode('');
-  }
+  const event = eventRequest.data;
 
   return (
     <div className="page">
@@ -81,71 +165,77 @@ export function ScanPage() {
             </p>
           </div>
           <Badge tone="accent">
-            {stats.checkedIn} / {stats.registered} in
+            {checkedInCount ?? event.checkedInCount ?? 0} / {event.registeredCount} in
           </Badge>
         </div>
 
-        {/* html5-qrcode will render its video stream into this element. */}
-        <div className="scanner__viewport" id="qr-viewport">
-          <div className="scanner__frame">
-            <span className="scanner__corner" />
-          </div>
-          <p className="scanner__hint">
-            {offline ? 'Offline — scans are saved on this device' : 'Point your camera at the attendee QR'}
-          </p>
-          <span className="scanner__placeholder">Camera placeholder</span>
+        <div className="scanner__viewport">
+          {/*
+            html5-qrcode empties and rewrites this element, so it gets a node of
+            its own that React never renders into — otherwise React and the
+            library fight over the same children and the placeholder disappears
+            for good after a failed camera start.
+          */}
+          <div id={VIEWPORT_ID} className="scanner__camera" />
+
+          {cameraState !== 'running' && (
+            <>
+              <div className="scanner__frame">
+                <span className="scanner__corner" />
+              </div>
+              <p className="scanner__hint">
+                {cameraState === 'starting'
+                  ? 'Starting the camera…'
+                  : cameraState === 'error'
+                    ? 'Camera unavailable — type the code below'
+                    : 'Point your camera at the attendee QR'}
+              </p>
+            </>
+          )}
         </div>
 
-        <div className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
+        {cameraState === 'running' ? (
           <Button
-            variant="primary"
-            loading={scanning}
-            style={{ flex: 1 }}
-            onClick={() => handleScan(samples.fresh ?? '')}
+            variant="ghost"
+            block
+            onClick={async () => {
+              const scanner = scannerRef.current;
+              if (scanner) {
+                await scanner.stop().catch(() => {});
+                scanner.clear();
+                scannerRef.current = null;
+              }
+              setCameraState('idle');
+            }}
           >
-            Simulate scan
+            Stop camera
           </Button>
-          <Button
-            variant={offline ? 'danger' : 'default'}
-            onClick={() => setOffline((prev) => !prev)}
-            aria-pressed={offline}
-          >
-            {offline ? 'Offline mode on' : 'Go offline'}
+        ) : (
+          <Button variant="primary" block loading={cameraState === 'starting'} onClick={startCamera}>
+            {cameraState === 'error' ? 'Try the camera again' : 'Start camera'}
           </Button>
-        </div>
+        )}
 
+        {cameraError && <Banner tone="warn">{cameraError}</Banner>}
+
+        {submitting && !result && <LoadingState label="Checking that ticket…" />}
         {result && <CheckInResult result={result} />}
 
         <Card padSm>
           <form className="row" style={{ gap: 8, flexWrap: 'nowrap' }} onSubmit={onManualSubmit}>
             <Input
               aria-label="Ticket code"
-              placeholder="Type a ticket code"
+              placeholder="Or type a ticket code"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value)}
             />
-            <Button type="submit" disabled={!manualCode.trim()}>
+            <Button type="submit" disabled={!manualCode.trim() || submitting}>
               Check in
             </Button>
           </form>
           <p className="muted" style={{ fontSize: '0.82rem', marginTop: 10 }}>
             Manual entry is the fallback when a phone screen is too cracked to scan.
           </p>
-        </Card>
-
-        <Card padSm>
-          <h3 style={{ fontSize: '0.92rem', marginBottom: 10 }}>Try the edge cases</h3>
-          <div className="row" style={{ gap: 8 }}>
-            <Button size="sm" onClick={() => handleScan(samples.used ?? '')} disabled={!samples.used}>
-              Already checked in
-            </Button>
-            <Button size="sm" onClick={() => handleScan('MIC-XXX-000000')}>
-              Invalid ticket
-            </Button>
-            <Button size="sm" onClick={() => handleScan(samples.otherEvent ?? '')} disabled={!samples.otherEvent}>
-              Wrong event
-            </Button>
-          </div>
         </Card>
 
         {recent.length > 0 && (
@@ -155,32 +245,29 @@ export function ScanPage() {
               {recent.map((entry, index) => (
                 <div className="list__row" key={`${entry.at}-${index}`}>
                   <div className="list__main">
-                    <div className="list__name">{entry.result.attendeeName ?? 'Unknown ticket'}</div>
+                    <div className="list__name">
+                      {entry.result.success
+                        ? entry.result.attendee.name
+                        : (entry.result.attendee?.name ?? 'Unknown ticket')}
+                    </div>
                     <div className="list__meta">{timeAgo(entry.at)}</div>
                   </div>
                   <Badge
                     tone={
-                      entry.result.outcome === 'success'
+                      entry.result.success
                         ? 'success'
-                        : entry.result.outcome === 'already_checked_in'
+                        : entry.result.reason === 'ALREADY_CHECKED_IN'
                           ? 'warn'
-                          : entry.result.outcome === 'offline_saved'
-                            ? 'accent'
-                            : 'danger'
+                          : 'danger'
                     }
                   >
-                    {entry.result.outcome.replace(/_/g, ' ')}
+                    {entry.result.success ? 'checked in' : entry.result.reason.replace(/_/g, ' ').toLowerCase()}
                   </Badge>
                 </div>
               ))}
             </div>
           </Card>
         )}
-
-        <DevNote>
-          No camera yet and no server call — the real scanner and the database check-in (with the
-          unique constraint that actually stops duplicates) plug into this same screen.
-        </DevNote>
 
         <Link to={`/organizer/events/${event.id}/dashboard`}>
           <Button variant="ghost" block>

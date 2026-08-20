@@ -1,12 +1,15 @@
 import { Link, Navigate } from 'react-router-dom';
-import { useApp } from '../store/context';
+import { useSession } from '../store/session';
 import { Button, Card } from '../components/ui';
 
 export function Landing() {
-  const { user } = useApp();
+  const { user, status } = useSession();
 
-  // Already signed in? Go straight to the right home screen.
-  if (user) return <Navigate to={user.role === 'ORGANIZER' ? '/organizer' : '/attendee'} replace />;
+  // Already signed in? Go straight to the right home screen. Wait for the
+  // session check first, or a signed-in reload would flash this page.
+  if (status === 'ready' && user) {
+    return <Navigate to={user.role === 'ORGANIZER' ? '/organizer' : '/attendee'} replace />;
+  }
 
   return (
     <>
@@ -25,8 +28,8 @@ export function Landing() {
               Get started
             </Button>
           </Link>
-          <Link to="/login">
-            <Button size="lg">I have a ticket</Button>
+          <Link to="/signup">
+            <Button size="lg">Create an account</Button>
           </Link>
         </div>
       </section>

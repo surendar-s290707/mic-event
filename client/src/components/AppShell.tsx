@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useApp } from '../store/context';
+import { useSession } from '../store/session';
 import { initials } from '../lib/format';
 import { ApiStatus } from './ApiStatus';
 import { Button } from './ui';
@@ -24,7 +24,7 @@ const attendeeNav: NavItem[] = [
 ];
 
 export function AppShell() {
-  const { user, signOut } = useApp();
+  const { user, signOut } = useSession();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -96,9 +96,9 @@ export function AppShell() {
                     <button
                       className="usermenu__item"
                       role="menuitem"
-                      onClick={() => {
+                      onClick={async () => {
                         setMenuOpen(false);
-                        signOut();
+                        await signOut();
                         navigate('/');
                       }}
                     >

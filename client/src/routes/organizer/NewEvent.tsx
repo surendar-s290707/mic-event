@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useApp } from '../../store/context';
+import { ApiError, api } from '../../lib/api';
 import { fromDateTimeInputs } from '../../lib/format';
-import { Banner, Button, Card, DevNote, Field, Input, Textarea } from '../../components/ui';
+import { Banner, Button, Card, Field, Input, Textarea } from '../../components/ui';
 
 interface FormState {
   name: string;
@@ -41,7 +41,6 @@ function validate(form: FormState): Errors {
 }
 
 export function NewEvent() {
-  const { createEvent } = useApp();
   const navigate = useNavigate();
 
   const [form, setForm] = useState<FormState>({
@@ -53,6 +52,7 @@ export function NewEvent() {
     description: '',
   });
   const [errors, setErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   function update<K extends keyof FormState>(key: K, value: string) {
@@ -60,8 +60,10 @@ export function NewEvent() {
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: undefined }));
   }
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setFormError(null);
+
     const nextErrors = validate(form);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -70,16 +72,30 @@ export function NewEvent() {
     if (!startsAt) return;
 
     setSubmitting(true);
-    // MOCK: adds the event to in-memory state. Becomes POST /api/events.
-    const event = createEvent({
-      name: form.name,
-      description: form.description,
-      venue: form.venue,
-      startsAt,
-      endsAt: new Date(new Date(startsAt).getTime() + EVENT_LENGTH_HOURS * 3600_000).toISOString(),
-      capacity: Number(form.capacity),
-    });
-    navigate(`/organizer/events/${event.id}`, { state: { created: true }, replace: true });
+    try {
+      const { event } = await api.createEvent({
+        name: form.name,
+        description: form.description,
+        venue: form.venue,
+        startsAt,
+        endsAt: new Date(new Date(startsAt).getTime() + EVENT_LENGTH_HOURS * 3600_000).toISOString(),
+        capacity: Number(form.capacity),
+      });
+      navigate(`/organizer/events/${event.id}`, { state: { created: true }, replace: true });
+    } catch (error) {
+      // The API validates the same rules again; show whatever it objected to.
+      if (error instanceof ApiError && error.details) {
+        setErrors({
+          name: error.details.name,
+          venue: error.details.venue,
+          capacity: error.details.capacity,
+          date: error.details.startsAt,
+          time: error.details.endsAt,
+        });
+      }
+      setFormError(error instanceof Error ? error.message : 'Could not create the event');
+      setSubmitting(false);
+    }
   }
 
   const hasErrors = Object.values(errors).some(Boolean);
@@ -172,7 +188,11 @@ export function NewEvent() {
             />
           </Field>
 
-          {hasErrors && <Banner tone="error">Check the highlighted fields and try again.</Banner>}
+          {formError ? (
+            <Banner tone="error">{formError}</Banner>
+          ) : hasErrors ? (
+            <Banner tone="error">Check the highlighted fields and try again.</Banner>
+          ) : null}
 
           <div className="row" style={{ justifyContent: 'flex-end', gap: 12 }}>
             <Link to="/organizer/events">
@@ -186,13 +206,6 @@ export function NewEvent() {
           </div>
         </form>
       </Card>
-
-      <div style={{ marginTop: 16 }}>
-        <DevNote>
-          The event is stored in browser memory for now, so it disappears on reload. The form already
-          sends the exact shape POST /api/events will take.
-        </DevNote>
-      </div>
     </div>
   );
 }

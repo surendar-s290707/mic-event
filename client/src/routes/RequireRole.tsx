@@ -1,20 +1,29 @@
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { Role } from '../lib/types';
-import { useApp } from '../store/context';
-import { Button, EmptyState } from '../components/ui';
+import { useSession } from '../store/session';
+import { Button, EmptyState, LoadingState } from '../components/ui';
 
 /**
- * CURRENT MOCK FUNCTIONALITY — client-side route gating only.
+ * Route gating for the UX only.
  *
- * This hides screens; it does not protect data. Real authorization is a
- * server concern: milestone 3 verifies the JWT and the user's role inside the
- * API handlers, so a hand-written request cannot reach an organizer endpoint
- * even if someone edits the frontend.
+ * The real boundary is the API: requireAuth / requireRole / ownership checks
+ * run on every request, so hand-written calls to an organizer endpoint fail
+ * with 401 or 403 regardless of what this component renders.
  */
 export function RequireRole({ role, children }: { role: Role; children: ReactNode }) {
-  const { user } = useApp();
+  const { user, status } = useSession();
   const location = useLocation();
+
+  // Wait for /api/auth/me before deciding, or a refresh would bounce a
+  // signed-in user to the login page for a frame.
+  if (status === 'loading') {
+    return (
+      <div className="page">
+        <LoadingState label="Checking your session…" />
+      </div>
+    );
+  }
 
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
 

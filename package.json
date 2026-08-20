@@ -13,7 +13,7 @@
     "server": "npm run dev -w server",
     "start": "concurrently -n server,client -c cyan,magenta \"npm:server\" \"npm:dev\"",
     "build": "npm run build -w server && npm run build -w client",
-    "start:prod": "npm run start -w server",
+    "start:prod": "NODE_ENV=production npm run start -w server",
     "lint": "eslint .",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
     "db:up": "docker compose up -d",

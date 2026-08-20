@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import type { EventItem, EventStats } from '../lib/types';
+import type { ReactNode } from 'react';
+import type { EventSummary } from '../lib/types';
 import { eventStatus, formatDay, formatTime, statusLabel } from '../lib/format';
 import { Badge } from './ui';
-import type { ReactNode } from 'react';
 
 const statusTone = {
   upcoming: 'outline',
@@ -13,13 +13,11 @@ const statusTone = {
 /** One event, one card — used by both the organizer and attendee lists. */
 export function EventCard({
   event,
-  stats,
   to,
   footer,
   rightSlot,
 }: {
-  event: EventItem;
-  stats: EventStats;
+  event: EventSummary;
   to: string;
   footer?: ReactNode;
   rightSlot?: ReactNode;
@@ -48,7 +46,7 @@ export function EventCard({
 
       <div className="eventcard__foot">
         <span className="muted" style={{ fontSize: '0.86rem' }}>
-          {stats.registered} / {stats.capacity} registered
+          {event.registeredCount} / {event.capacity} registered
         </span>
         {footer}
       </div>

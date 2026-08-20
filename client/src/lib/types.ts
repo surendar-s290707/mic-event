@@ -1,9 +1,6 @@
 /**
- * Domain types.
- *
- * These deliberately mirror the tables we will create with Prisma in the next
- * milestone (User, Event, Registration, CheckIn), so swapping mock state for
- * real API responses is mostly a change of data source, not of shape.
+ * Shapes returned by the API. These mirror server/src/lib/serialize.ts —
+ * if a field is missing here, the server deliberately did not send it.
  */
 
 export type Role = 'ORGANIZER' | 'ATTENDEE';
@@ -13,69 +10,76 @@ export interface User {
   name: string;
   email: string;
   role: Role;
+  createdAt: string;
 }
 
-export interface EventItem {
+/** The caller's own registration, attached to an event they can see. */
+export interface MyRegistration {
+  id: string;
+  createdAt: string;
+  checkedIn: boolean;
+  checkedInAt: string | null;
+}
+
+export interface EventSummary {
   id: string;
   name: string;
   description: string;
   venue: string;
-  /** ISO string. Stored as one instant; the UI splits it into date + time. */
   startsAt: string;
   endsAt: string;
   capacity: number;
-  organizerId: string;
+  organizer: { id: string; name: string };
+  registeredCount: number;
+  spotsLeft: number;
+  /** Organizer-owner only — attendees never receive this. */
+  checkedInCount?: number;
+  myRegistration: MyRegistration | null;
 }
 
-export interface Registration {
+export interface Ticket {
   id: string;
-  eventId: string;
-  attendeeId: string;
-  attendeeName: string;
+  qrToken: string;
   createdAt: string;
-  /**
-   * MOCK: a stable, human-readable code printed into the QR.
-   * FUTURE: replaced by a signed, short-lived / single-use token that the
-   * server issues and validates (hard requirement #2).
-   */
-  ticketCode: string;
+  checkedIn: boolean;
+  checkedInAt: string | null;
+  attendee: { id: string; name: string };
+  event: { id: string; name: string; venue: string; startsAt: string; endsAt: string };
 }
-
-export type CheckInMethod = 'SCAN' | 'MANUAL' | 'OFFLINE_SYNC';
-
-export interface CheckIn {
-  id: string;
-  eventId: string;
-  registrationId: string;
-  attendeeName: string;
-  checkedInAt: string;
-  method: CheckInMethod;
-}
-
-/** Derived from startsAt / endsAt — not stored, so it can never go stale. */
-export type EventStatus = 'upcoming' | 'live' | 'ended';
 
 export interface EventStats {
   capacity: number;
-  registered: number;
-  checkedIn: number;
+  registeredCount: number;
+  checkedInCount: number;
   spotsLeft: number;
-  /** 0–100, share of registered attendees who have checked in. */
   attendancePercent: number;
 }
 
-/** The outcomes the scanner has to be able to show (spec section 12). */
-export type CheckInOutcome =
-  | 'success'
-  | 'already_checked_in'
-  | 'invalid_ticket'
-  | 'wrong_event'
-  | 'offline_saved';
-
-export interface CheckInResultData {
-  outcome: CheckInOutcome;
-  attendeeName?: string;
-  /** Set for already_checked_in — the time of the original scan. */
-  checkedInAt?: string;
-  ticketCode?: string;
+export interface RecentCheckIn {
+  id: string;
+  name: string;
+  checkedInAt: string;
+  stationId: string | null;
 }
+
+export interface StatsResponse {
+  stats: EventStats;
+  recentCheckIns: RecentCheckIn[];
+  /** ISO timestamps of check-ins in the last two hours, for the arrivals chart. */
+  arrivals: string[];
+}
+
+export type ScanFailureReason = 'ALREADY_CHECKED_IN' | 'INVALID_TICKET' | 'WRONG_EVENT';
+
+export type ScanResult =
+  | { success: true; message: string; attendee: { name: string }; checkedInAt: string }
+  | {
+      success: false;
+      reason: ScanFailureReason;
+      message: string;
+      attendee?: { name: string };
+      checkedInAt?: string | null;
+    };
+
+/** Derived from an event's own times — never stored, so it cannot go stale. */
+export type EventStatus = 'upcoming' | 'live' | 'ended';
