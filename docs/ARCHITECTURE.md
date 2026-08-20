@@ -6,24 +6,26 @@ reader — or a fresh session — can tell the difference between what runs and 
 ## Shape
 
 ```
-browser ──/api/*──> Express (server/)          [today: health only]
-   │                    └── PostgreSQL + Prisma  [milestone 2]
-   └── React (client/) with all state in AppStore
+browser ──/api/*──> Express (server/) ──> PostgreSQL (Prisma)
+   │                    requireAuth -> requireRole -> ownership check
+   └── React (client/): SessionProvider holds who is signed in,
+       each screen fetches its own data with useAsync
 ```
 
 One npm workspace, two packages. No microservices, no GraphQL, no message queue — a single API
 process and a single database is enough for a campus event, and it is far easier to reason about
 under concurrency.
 
-## The mock boundary
+## No mock layer
 
-Every screen reads and writes through one interface: `client/src/store/context.ts`. The provider
-in `AppStore.tsx` implements it from `client/src/mock/data.ts`, which is the only file containing
-fake data. When the API lands, `AppStore` starts making HTTP calls and the mock file is deleted;
-no page component changes.
+There is none left. `client/src/mock/data.ts` and the in-memory store were deleted in milestone 2;
+every screen now calls `client/src/lib/api.ts`, which is the only file that knows a URL. The session
+lives in an HTTP-only cookie, so no token is ever handled in JavaScript — `SessionProvider` just
+caches the answer to `GET /api/auth/me`.
 
-Anything still faked is marked in two ways: a comment block headed `CURRENT MOCK FUNCTIONALITY`
-in the source, and a small "Mock" note in the UI itself, so a demo never implies more than exists.
+Data fetching is deliberately plain: `useAsync` runs a request, exposes `{ data, loading, error,
+reload }`, and screens render the three states. No client-side cache, because a check-in desk wants
+the database's answer, not a stale one.
 
 ## Decisions made so far
 
@@ -38,48 +40,56 @@ nobody updates it.
 **Times as ISO instants.** The API and store speak ISO strings; only the UI splits them into a
 date and a time for display, and the create form converts back with `fromDateTimeInputs`.
 
-**Client-side role gating is presentation only.** `RequireRole` hides screens. It is not security,
-and the code says so. Authorization belongs in the API handlers.
+**Client-side role gating is presentation only.** `RequireRole` hides screens. The real boundary is
+`requireAuth` -> `requireRole` -> an ownership check inside each handler, and the test suite attacks
+it directly with hand-written requests rather than through the UI.
+
+**Correctness lives in the database.** Capacity is enforced by a transaction that locks the event row
+before counting; duplicate registrations and duplicate check-ins are unique indexes. Application code
+attempts the write and translates the constraint violation into a friendly message. A read-then-write
+check would pass for two simultaneous requests — a unique index cannot.
+
+**Scan verdicts are 200s.** `already checked in`, `invalid ticket` and `wrong event` are answers, not
+transport failures: the request worked, the ticket did not. Authentication and ownership failures
+stay 401/403.
 
 **Dev proxy over CORS.** In development Vite proxies `/api` to Express, so the browser only ever
 talks to one origin and there is no CORS configuration to get wrong. In production the API can
 serve the built client from the same origin, or `VITE_API_BASE_URL` points at a separate host.
 
-## Where the hard requirements will live
+## The hard requirements
 
-These are **not implemented**. This section records the intended design so the next session does
-not have to rediscover it.
+**1. Duplicate check-ins and capacity — implemented.**
+Both are database constraints, because the API may run as several processes and an in-process lock
+would not survive that. A check-in is an insert into `CheckIn` with `registrationId @unique`; the
+second scan violates it and the handler returns `ALREADY_CHECKED_IN` with the original timestamp.
+Registration runs in a transaction that locks the event row (`SELECT … FOR UPDATE`) before counting,
+so simultaneous requests queue and each sees committed rows. The test suite asserts both: 20 parallel
+registrations on a capacity-3 event leave exactly 3 rows, 12 parallel scans leave exactly 1 check-in.
+Still to come: the same proof run against **two** API processes sharing one database, with the log
+committed.
 
-**1. Duplicate check-ins and capacity, correct under concurrency.**
-Correctness has to sit in the database, because the API may run as several processes. A check-in
-is an insert into `CheckIn` with `registrationId @unique`; the second scan violates the constraint
-and the handler turns that violation into an `already_checked_in` response carrying the original
-timestamp. Capacity is enforced inside a transaction that counts registrations with the event row
-locked (`SELECT ... FOR UPDATE`) — or equivalently by an insert guarded by a conditional write —
-so 500 simultaneous registrations for 50 seats produce exactly 50 rows. Proof will be a script
-firing 100+ concurrent requests against two server processes sharing one database, with the log
-attached. The draft constraints are already in `prisma/schema.prisma`.
+**2. QR sharing / screenshots — partly addressed.**
+The QR carries an opaque 32-byte token and nothing else, so a leaked image reveals nothing about its
+owner. But the token is long-lived, so a screenshot sent to a friend still works until someone uses
+it — the second arrival is refused, without the system knowing which person was genuine. Milestone 4
+adds short-lived rotating tokens; the tradeoff (rotation needs the attendee's phone online) belongs
+in the write-up.
 
-**2. QR sharing / screenshots.**
-The ticket carries a server-signed token, not a bare registration id. Planned approach: rotating
-short-lived tokens (the ticket page refreshes them while online), falling back to single-use if
-venue wifi makes rotation unreliable. The tradeoff — rotation needs the attendee's phone online,
-single-use fails if a scan is lost after invalidation — goes in the write-up.
-`components/QrPlaceholder.tsx` is the only place that changes on the client.
+**3. Offline-first scanning — not built.**
+The scanner funnels every scan through one `submitToken` function, which is where the queue goes.
+The plan: IndexedDB queue with a client-generated scan id, replayed on reconnect, with
+`CheckIn.clientScanId` unique so replays are idempotent. The contested case — scanned offline at
+station A, then online at station B — resolves to a single check-in: keep the earlier scan time,
+report the later sync as a duplicate rather than dropping it. `CheckIn.stationId` already records
+which device scanned.
 
-**3. Offline-first scanning.**
-The scanner already funnels every scan through one `handleScan` function and has an offline state
-in the UI. The real version queues scans in IndexedDB with a client-generated scan id, and replays
-them on reconnect; `CheckIn.clientScanId @unique` makes the replay idempotent. The contested case
-— scanned offline at station A, then online at station B — resolves to a single check-in, with
-the earlier scan time kept and the later sync reported back as a duplicate rather than dropped.
+**4. AI insights — not built.**
+`GET /api/events/:id/stats` already computes the numbers an organizer would ask about (checked in,
+turnout, spots left, arrival times). The AI endpoint passes those computed values to the model as
+context so it phrases them without inventing figures; the key stays server-side, the call gets a
+timeout, and the dashboard falls back to the raw stats when it fails.
 
-**4. AI insights.**
-The API computes the numbers (checked in, no-show rate, peak time, spots left) from the database,
-then passes those computed values to the model as context; the model phrases them and never
-invents figures. The key stays server-side, the endpoint has a timeout, and the dashboard falls
-back to showing the raw stats when the call fails.
-
-**Live dashboard.** Socket.IO room per event; the check-in handler emits after the transaction
-commits. The dashboard component already re-renders from a single stats selector, so subscribing
-is a local change.
+**Live dashboard — polling today.** The dashboard re-queries `/stats` every 10 seconds. Socket.IO
+(a room per event, emitting after the check-in transaction commits) replaces the interval; the
+component already renders from one stats object, so subscribing is a local change.

@@ -1,6 +1,7 @@
 # Progress log
 
-A fresh session should be able to continue from this file plus the repository.
+History, newest last. For the current state of the system, read
+[CHECKPOINT.md](../CHECKPOINT.md) — this file is the record of how it got there.
 
 ---
 
@@ -73,3 +74,24 @@ Suggested order, each step leaving the app runnable:
 
 Then: auth (milestone 3), QR tokens + real scanning (4), offline sync + Socket.IO (5),
 AI insights + CSV export (6).
+
+---
+
+## Milestone 2 — real core application ✅ (2026-08-20)
+
+Replaced every mocked flow with a database-backed one: PostgreSQL + Prisma, bcrypt/JWT-cookie
+authentication, server-enforced roles and ownership, transactional registration, opaque QR tokens
+with real generation and camera scanning, constraint-backed check-in, live dashboard numbers and
+CSV export. `client/src/mock/data.ts` was deleted.
+
+Added 39 integration tests against a real database, including two concurrency cases.
+
+Full detail, verification log, known limitations and the next milestone:
+[CHECKPOINT.md](../CHECKPOINT.md).
+
+Two bugs found and fixed while verifying:
+
+- an already-registered attendee on a full event was told "event full", because the capacity check
+  ran before the duplicate check;
+- `NODE_ENV=development` in the shared `.env` made Vite ship a **development** React build (474 kB,
+  dev warnings). `NODE_ENV` now comes from the process only.
