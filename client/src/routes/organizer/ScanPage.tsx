@@ -4,7 +4,14 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { ApiError, api } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { getStationId } from '../../lib/station';
-import type { ScanResult } from '../../lib/types';
+import {
+  forgetScan,
+  newClientScanId,
+  offlineQueueAvailable,
+  pendingScans,
+  queueScan,
+} from '../../lib/offlineQueue';
+import type { ScannerFeedback } from '../../lib/types';
 import { formatTime, timeAgo } from '../../lib/format';
 import { Badge, Banner, Button, Card, ErrorState, Input, LoadingState } from '../../components/ui';
 import { CheckInResult } from '../../components/CheckInResult';
@@ -25,8 +32,12 @@ export function ScanPage() {
   const { id = '' } = useParams();
   const eventRequest = useAsync(() => api.getEvent(id).then((r) => r.event), [id]);
 
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const [recent, setRecent] = useState<{ result: ScanResult; at: string }[]>([]);
+  const [result, setResult] = useState<ScannerFeedback | null>(null);
+  const [recent, setRecent] = useState<{ result: ScannerFeedback; at: string }[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState<string | null>(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
   const [manualCode, setManualCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [cameraState, setCameraState] = useState<'idle' | 'starting' | 'running' | 'error'>('idle');
@@ -37,30 +48,135 @@ export function ScanPage() {
   const lastScanRef = useRef<{ token: string; at: number } | null>(null);
   const inFlightRef = useRef(false);
 
+  const refreshPending = useCallback(async () => {
+    if (!offlineQueueAvailable()) return;
+    try {
+      setPendingCount((await pendingScans(id)).length);
+    } catch {
+      /* a browser that refuses IndexedDB just shows no queue */
+    }
+  }, [id]);
+
+  /**
+   * Sends everything the device queued while offline.
+   *
+   * Every verdict the server returns is final — checked in, already synced,
+   * already checked in, invalid, wrong event — so the queue entry is dropped
+   * either way. Only a failed *request* leaves a scan queued for the next try,
+   * which is what makes this safe to call repeatedly.
+   */
+  const flushQueue = useCallback(async () => {
+    if (syncing || !offlineQueueAvailable()) return;
+
+    const queued = await pendingScans(id).catch(() => []);
+    if (queued.length === 0) {
+      setPendingCount(0);
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      const { results } = await api.syncScans(
+        id,
+        queued.map(({ clientScanId, token, scannedAt, stationId }) => ({
+          clientScanId,
+          token,
+          scannedAt,
+          stationId,
+        })),
+      );
+
+      for (const outcome of results) await forgetScan(outcome.clientScanId);
+
+      const accepted = results.filter((r) => r.success && r.reason !== 'ALREADY_SYNCED').length;
+      const duplicates = results.filter((r) => r.reason === 'ALREADY_CHECKED_IN').length;
+      const rejected = results.filter(
+        (r) => r.reason === 'INVALID_TICKET' || r.reason === 'WRONG_EVENT',
+      ).length;
+
+      setSyncNote(
+        `Synced ${results.length} offline scan${results.length === 1 ? '' : 's'}: ` +
+          `${accepted} checked in` +
+          (duplicates > 0 ? `, ${duplicates} already checked in` : '') +
+          (rejected > 0 ? `, ${rejected} rejected` : '') +
+          '.',
+      );
+      if (accepted > 0) setCheckedInCount((count) => (count === null ? null : count + accepted));
+    } catch (error) {
+      // Still offline, or the server is down: the queue is untouched.
+      setSyncNote(
+        error instanceof ApiError && error.code === 'network_error'
+          ? 'Still offline — your scans are safe on this device.'
+          : 'We couldn’t sync just now. Your scans are still queued.',
+      );
+    } finally {
+      setSyncing(false);
+      await refreshPending();
+    }
+  }, [id, refreshPending, syncing]);
+
   const submitToken = useCallback(
     async (token: string) => {
       if (!token || inFlightRef.current) return;
       inFlightRef.current = true;
       setSubmitting(true);
+      setSyncNote(null);
+
+      // Every scan carries its own id, so a queued retry can never be counted
+      // twice — the server treats the id as an idempotency key.
+      const scan = {
+        clientScanId: newClientScanId(),
+        eventId: id,
+        token,
+        scannedAt: new Date().toISOString(),
+        stationId: getStationId(),
+      };
+
+      const queueLocally = async (message: string) => {
+        if (!offlineQueueAvailable()) {
+          setCameraError('This browser can’t queue scans offline. Reconnect and scan again.');
+          return;
+        }
+        await queueScan(scan);
+        await refreshPending();
+        const feedback = { queued: true as const, message };
+        setResult(feedback);
+        setRecent((prev) => [{ result: feedback, at: new Date().toISOString() }, ...prev].slice(0, 8));
+      };
+
       try {
-        const scan = await api.checkIn(id, token, getStationId());
-        setResult(scan);
-        setRecent((prev) => [{ result: scan, at: new Date().toISOString() }, ...prev].slice(0, 8));
-        if (scan.success) setCheckedInCount((count) => (count === null ? null : count + 1));
+        // Known to be offline: don't even try, just queue it.
+        if (!navigator.onLine) {
+          await queueLocally(`${scan.stationId} · queued on this device, nothing lost.`);
+          return;
+        }
+
+        const outcome = await api.checkIn(id, token, {
+          stationId: scan.stationId,
+          clientScanId: scan.clientScanId,
+          scannedAt: scan.scannedAt,
+        });
+        setResult(outcome);
+        setRecent((prev) => [{ result: outcome, at: new Date().toISOString() }, ...prev].slice(0, 8));
+        if (outcome.success && outcome.reason !== 'ALREADY_SYNCED') {
+          setCheckedInCount((count) => (count === null ? null : count + 1));
+        }
       } catch (error) {
-        // A failed request is not a scan verdict — say so plainly.
-        setResult(null);
-        setCameraError(
-          error instanceof ApiError
-            ? error.message
-            : 'We couldn’t reach the server to record that scan.',
-        );
+        // The network died mid-scan: queue it rather than losing it.
+        if (error instanceof ApiError && error.code === 'network_error') {
+          await queueLocally('Connection dropped — queued on this device.');
+        } else {
+          setResult(null);
+          setCameraError(
+            error instanceof ApiError ? error.message : 'We couldn’t record that scan.',
+          );
+        }
       } finally {
         inFlightRef.current = false;
         setSubmitting(false);
       }
     },
-    [id],
+    [id, refreshPending],
   );
 
   const onDecoded = useCallback(
@@ -112,6 +228,29 @@ export function ScanPage() {
       scannerRef.current = null;
     };
   }, []);
+
+  // Sync as soon as the connection comes back, and once on arrival in case the
+  // last session left scans behind.
+  useEffect(() => {
+    // Arriving (or reloading) with scans still queued: send them now.
+    if (navigator.onLine) void flushQueue();
+    else void refreshPending();
+
+    const goOnline = () => {
+      setOnline(true);
+      void flushQueue();
+    };
+    const goOffline = () => setOnline(false);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+    // flushQueue changes with `syncing`; re-subscribing on that is harmless and
+    // keeps the listener pointed at the current queue state.
+  }, [refreshPending, flushQueue]);
 
   useEffect(() => {
     if (eventRequest.data && checkedInCount === null) {
@@ -218,6 +357,33 @@ export function ScanPage() {
 
         {cameraError && <Banner tone="warn">{cameraError}</Banner>}
 
+        {!online && (
+          <Banner tone="warn">
+            You’re offline. Scans are saved on this device and sent automatically when the
+            connection returns.
+          </Banner>
+        )}
+
+        {pendingCount > 0 && (
+          <Card padSm>
+            <div className="spread">
+              <div>
+                <strong style={{ fontSize: '0.94rem' }}>
+                  {pendingCount} scan{pendingCount === 1 ? '' : 's'} waiting to sync
+                </strong>
+                <p className="muted" style={{ fontSize: '0.82rem' }}>
+                  Kept on this device until the server confirms them.
+                </p>
+              </div>
+              <Button size="sm" loading={syncing} disabled={!online} onClick={() => void flushQueue()}>
+                Sync now
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {syncNote && <Banner tone="info">{syncNote}</Banner>}
+
         {submitting && !result && <LoadingState label="Checking that ticket…" />}
         {result && <CheckInResult result={result} />}
 
@@ -246,22 +412,28 @@ export function ScanPage() {
                 <div className="list__row" key={`${entry.at}-${index}`}>
                   <div className="list__main">
                     <div className="list__name">
-                      {entry.result.success
-                        ? entry.result.attendee.name
+                      {'queued' in entry.result
+                        ? 'Queued offline'
                         : (entry.result.attendee?.name ?? 'Unknown ticket')}
                     </div>
                     <div className="list__meta">{timeAgo(entry.at)}</div>
                   </div>
                   <Badge
                     tone={
-                      entry.result.success
-                        ? 'success'
-                        : entry.result.reason === 'ALREADY_CHECKED_IN'
-                          ? 'warn'
-                          : 'danger'
+                      'queued' in entry.result
+                        ? 'accent'
+                        : entry.result.success
+                          ? 'success'
+                          : entry.result.reason === 'ALREADY_CHECKED_IN'
+                            ? 'warn'
+                            : 'danger'
                     }
                   >
-                    {entry.result.success ? 'checked in' : entry.result.reason.replace(/_/g, ' ').toLowerCase()}
+                    {'queued' in entry.result
+                      ? 'saved offline'
+                      : entry.result.success
+                        ? 'checked in'
+                        : entry.result.reason.replace(/_/g, ' ').toLowerCase()}
                   </Badge>
                 </div>
               ))}

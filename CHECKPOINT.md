@@ -28,13 +28,13 @@ reads and writes PostgreSQL through the API.
 | Attendee status | ✅ | Registered / Checked in, straight from the database |
 | CSV export | ✅ | Owner-only; name, email, registered at, status, timestamp |
 | Error handling | ✅ | Typed API errors; loading / empty / error states on every screen |
-| Tests | ✅ | 39 integration tests against a real database |
+| Offline scanning | ✅ | IndexedDB queue, auto-sync on reconnect, idempotent replay |
+| Tests | ✅ | 59 integration tests against a real database |
 
 ## Not implemented yet
 
 | Requirement | Milestone |
 | ----------- | --------- |
-| Offline-first scanning and sync | 3 |
 | Socket.IO live dashboard (polling for now) | 3 |
 | Standalone 100+ concurrent request proof script + log | 3 |
 | Rotating / expiring QR tokens (currently long-lived opaque tokens) | 4 |
@@ -62,6 +62,30 @@ Demo accounts (password `mic12345`): `aditi@mic.dev` (organizer),
 
 ---
 
+## Offline scanning and the conflict policy
+
+A scan is queued in IndexedDB (not memory — the tab may reload) whenever the device is offline or the
+request fails mid-scan. Each scan carries a `clientScanId` generated on the device, which is a unique
+column on `CheckIn`, so replaying the queue can never insert twice. The queue flushes automatically
+when the browser fires `online`, and on arriving at the scanner with scans still pending.
+
+Every server verdict is final, so the queue entry is dropped whatever comes back — checked in,
+already synced, already checked in, invalid, wrong event. Only a failed *request* leaves a scan
+queued for the next attempt.
+
+**One check-in row per registration: first write wins, earliest scan time wins.**
+
+The case in the brief — scanned offline at station A, then online at station B before A reconnects:
+B's scan creates the row. When A syncs, no second row is created and A is told
+`ALREADY_CHECKED_IN` — never silently dropped. Because A's scan really happened earlier,
+`checkedInAt` is corrected backwards to A's time, so the arrivals chart and "when did check-ins
+peak" reflect the door rather than the network. The alternative — letting the later sync overwrite
+or insert — would either lose the true arrival time or break the one-row guarantee that makes
+duplicate protection provable.
+
+The device clock is not trusted blindly: a `scannedAt` in the future or more than a day old is
+ignored in favour of server time.
+
 ## Database
 
 Four tables. The constraints are the design:
@@ -71,8 +95,10 @@ User         id, name, email (unique), passwordHash, role, createdAt
 Event        id, name, description, venue, startsAt, endsAt, capacity, organizerId → User
 Registration id, eventId → Event, userId → User, qrToken (unique), createdAt
              UNIQUE (eventId, userId)          ← one seat per person per event
-CheckIn      id, registrationId → Registration (UNIQUE), checkedInAt, stationId
+CheckIn      id, registrationId → Registration (UNIQUE), checkedInAt, stationId,
+             clientScanId (UNIQUE, nullable)
              UNIQUE registrationId             ← one check-in per registration
+             UNIQUE clientScanId               ← replaying a queued scan is a no-op
 ```
 
 `prisma/migrations/20260820191250_init` is the only migration so far.
@@ -98,7 +124,7 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 
 ## Verification performed
 
-**Automated** — `npm test`: 39 tests, 39 passing, 0 failing (~9s).
+**Automated** — `npm test`: 59 tests, 59 passing, 0 failing (~12s).
 
 - auth: signup, login, wrong password, logout, unauthenticated rejection, duplicate email, malformed
   input, bcrypt hash stored, no `passwordHash` in any response, tampered cookie rejected
@@ -108,6 +134,10 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 - registration: valid, duplicate, nonexistent event, finished event, invalid capacity (0, negative,
   fractional, non-numeric), backwards dates
 - check-in: valid, duplicate (with the original timestamp), invalid token, wrong event, empty token
+- offline: queued scan checks in on sync and keeps the door time; replaying a batch (serially and
+  8× concurrently) never makes a second check-in; A-syncs-after-B reports a duplicate and corrects
+  the time backwards; the later queued scan leaves the time alone; invalid and wrong-event scans are
+  judged identically to live ones; a bad device clock is ignored; ownership still enforced
 - concurrency: 20 simultaneous registrations on a capacity-3 event → exactly 3 rows; 12 simultaneous
   scans of one ticket → exactly 1 check-in row
 

@@ -12,6 +12,7 @@ import type {
   Role,
   ScanResult,
   StatsResponse,
+  SyncResult,
   Ticket,
   User,
 } from './types';
@@ -125,10 +126,24 @@ export const api = {
     request<{ ticket: Ticket }>(`/api/registrations/${registrationId}`),
 
   // --- organizer ---
-  checkIn: (eventId: string, token: string, stationId?: string) =>
+  checkIn: (
+    eventId: string,
+    token: string,
+    options: { stationId?: string; clientScanId?: string; scannedAt?: string } = {},
+  ) =>
     request<ScanResult>(`/api/events/${eventId}/check-in`, {
       method: 'POST',
-      body: json({ token, stationId }),
+      body: json({ token, ...options }),
+    }),
+  /** Replays scans queued while offline. Safe to call more than once. */
+  syncScans: (
+    eventId: string,
+    scans: { clientScanId: string; token: string; scannedAt: string; stationId?: string }[],
+  ) =>
+    request<{ results: SyncResult[] }>(`/api/events/${eventId}/check-in/sync`, {
+      method: 'POST',
+      body: json({ scans }),
+      timeoutMs: 20_000,
     }),
   stats: (eventId: string) => request<StatsResponse>(`/api/events/${eventId}/stats`),
   /** Plain URL — the browser downloads it directly, cookie and all. */

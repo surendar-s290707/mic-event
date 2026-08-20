@@ -83,6 +83,10 @@ model CheckIn {
   checkedInAt    DateTime @default(now())
   /// Which scanner recorded it — useful once several doors scan at once.
   stationId      String?
+  /// Set by the scanner device before the scan is sent. Unique, so replaying a
+  /// queued offline scan can never insert a second row: the retry either finds
+  /// its own earlier write or loses the race and is reported as a duplicate.
+  clientScanId   String?  @unique
 
   registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 }

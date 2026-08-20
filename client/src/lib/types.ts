@@ -72,14 +72,42 @@ export interface StatsResponse {
 export type ScanFailureReason = 'ALREADY_CHECKED_IN' | 'INVALID_TICKET' | 'WRONG_EVENT';
 
 export type ScanResult =
-  | { success: true; message: string; attendee: { name: string }; checkedInAt: string }
+  | {
+      success: true;
+      message: string;
+      attendee?: { name: string };
+      checkedInAt?: string | null;
+      /** Set when this scan had already been synced — no new check-in was made. */
+      reason?: 'ALREADY_SYNCED';
+    }
   | {
       success: false;
       reason: ScanFailureReason;
       message: string;
       attendee?: { name: string };
       checkedInAt?: string | null;
+      /** The queued scan was earlier, so the stored check-in time moved back. */
+      reconciled?: boolean;
     };
+
+/** One result per scan in a sync batch, in the order they were sent. */
+export interface SyncResult {
+  clientScanId: string;
+  success: boolean;
+  reason?: ScanFailureReason | 'ALREADY_SYNCED';
+  message: string;
+  attendee?: { name: string };
+  checkedInAt?: string | null;
+  reconciled?: boolean;
+}
+
+/** Client-only: the scan is in the local queue, not yet at the server. */
+export interface QueuedLocally {
+  queued: true;
+  message: string;
+}
+
+export type ScannerFeedback = ScanResult | QueuedLocally;
 
 /** Derived from an event's own times — never stored, so it cannot go stale. */
 export type EventStatus = 'upcoming' | 'live' | 'ended';

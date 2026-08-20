@@ -8,6 +8,7 @@ import { parseBody } from '../lib/validate.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { serializeEvent, serializeTicket } from '../lib/serialize.js';
 import { toCsv } from '../lib/csv.js';
+import { recordCheckIn } from '../lib/checkin.js';
 
 export const eventsRouter = Router();
 
@@ -248,6 +249,24 @@ eventsRouter.get(
 const checkInSchema = z.object({
   token: z.string().trim().min(1, 'Scan or type a ticket code'),
   stationId: z.string().trim().max(60).optional(),
+  /** Present when the scanner queued this scan offline. */
+  clientScanId: z.string().trim().min(8).max(80).optional(),
+  scannedAt: z.string().datetime({ offset: true }).optional(),
+});
+
+/** A batch of scans a scanner recorded while it had no connection. */
+const syncSchema = z.object({
+  scans: z
+    .array(
+      z.object({
+        clientScanId: z.string().trim().min(8).max(80),
+        token: z.string().trim().min(1),
+        scannedAt: z.string().datetime({ offset: true }),
+        stationId: z.string().trim().max(60).optional(),
+      }),
+    )
+    .min(1, 'Nothing to sync')
+    .max(200, 'Too many scans in one batch'),
 });
 
 /**
@@ -269,53 +288,36 @@ eventsRouter.post(
     const event = await loadOwnedEvent(req.params.eventId, req.user!.id);
     const input = parseBody(checkInSchema, req.body);
 
-    const registration = await prisma.registration.findUnique({
-      where: { qrToken: input.token },
-      include: { user: true, checkIn: true },
-    });
+    const result = await recordCheckIn({ eventId: event.id, ...input });
+    res.json(result);
+  }),
+);
 
-    if (!registration) {
-      res.json({ success: false, reason: 'INVALID_TICKET', message: 'We don’t recognise this ticket.' });
-      return;
+/**
+ * POST /api/events/:eventId/check-in/sync — organizer who owns the event.
+ *
+ * Replays scans a device queued while offline. Every scan is judged by the
+ * same recordCheckIn() the live scanner uses, and each carries a clientScanId
+ * so replaying the batch cannot produce a second check-in. The response has
+ * one result per scan, in the same order, so the device knows exactly which
+ * queue entries it may delete.
+ */
+eventsRouter.post(
+  '/:eventId/check-in/sync',
+  requireRole('ORGANIZER'),
+  asyncHandler(async (req, res) => {
+    const event = await loadOwnedEvent(req.params.eventId, req.user!.id);
+    const { scans } = parseBody(syncSchema, req.body);
+
+    // Sequential on purpose: a batch from one device is small, and two scans of
+    // the same ticket inside it should resolve in the order they happened.
+    const results = [];
+    for (const scan of scans) {
+      const result = await recordCheckIn({ eventId: event.id, ...scan });
+      results.push({ clientScanId: scan.clientScanId, ...result });
     }
 
-    if (registration.eventId !== event.id) {
-      res.json({
-        success: false,
-        reason: 'WRONG_EVENT',
-        message: 'This ticket belongs to another event.',
-        attendee: { name: registration.user.name },
-      });
-      return;
-    }
-
-    try {
-      const checkIn = await prisma.checkIn.create({
-        data: { registrationId: registration.id, stationId: input.stationId ?? null },
-      });
-      res.json({
-        success: true,
-        message: 'Checked in successfully',
-        attendee: { name: registration.user.name },
-        checkedInAt: checkIn.checkedInAt.toISOString(),
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        // Someone (or another scanner) got there first.
-        const existing = await prisma.checkIn.findUnique({
-          where: { registrationId: registration.id },
-        });
-        res.json({
-          success: false,
-          reason: 'ALREADY_CHECKED_IN',
-          message: 'This ticket was already used.',
-          attendee: { name: registration.user.name },
-          checkedInAt: existing?.checkedInAt.toISOString() ?? null,
-        });
-        return;
-      }
-      throw error;
-    }
+    res.json({ results });
   }),
 );
 

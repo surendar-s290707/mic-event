@@ -1,20 +1,42 @@
-import type { ScanResult } from '../lib/types';
+import type { ScannerFeedback } from '../lib/types';
 import { formatTime } from '../lib/format';
 
 /**
  * What the door staff sees after a scan. The API returns one of four verdicts;
  * this maps each to a human sentence. Nothing is ever silently swallowed.
  */
-export function CheckInResult({ result }: { result: ScanResult }) {
+export function CheckInResult({ result }: { result: ScannerFeedback }) {
+  if ('queued' in result) {
+    return (
+      <div className="result result--info" role="status">
+        <span className="result__icon" aria-hidden="true">
+          ⇅
+        </span>
+        <div>
+          <div className="result__title">Saved offline — we’ll sync when you’re back online</div>
+          <div className="result__body">{result.message}</div>
+        </div>
+      </div>
+    );
+  }
+
   if (result.success) {
+    const alreadySynced = result.reason === 'ALREADY_SYNCED';
     return (
       <div className="result result--success" role="status">
         <span className="result__icon" aria-hidden="true">
           ✓
         </span>
         <div>
-          <div className="result__title">You’re checked in</div>
-          <div className="result__body">{result.attendee.name} · welcome in</div>
+          <div className="result__title">
+            {alreadySynced ? 'Already synced' : 'You’re checked in'}
+          </div>
+          <div className="result__body">
+            {result.attendee?.name ?? 'This ticket'}
+            {alreadySynced
+              ? ` · checked in at ${result.checkedInAt ? formatTime(result.checkedInAt) : 'an earlier time'}`
+              : ' · welcome in'}
+          </div>
         </div>
       </div>
     );
@@ -27,7 +49,7 @@ export function CheckInResult({ result }: { result: ScanResult }) {
       title: 'Already checked in',
       body: `${result.attendee?.name ?? 'This ticket'} was scanned at ${
         result.checkedInAt ? formatTime(result.checkedInAt) : 'an earlier time'
-      }`,
+      }${result.reconciled ? ' — your earlier offline scan corrected the time' : ''}`,
     },
     INVALID_TICKET: {
       className: 'result--error',
