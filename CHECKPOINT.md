@@ -30,7 +30,8 @@ reads and writes PostgreSQL through the API.
 | Error handling | ✅ | Typed API errors; loading / empty / error states on every screen |
 | Offline scanning | ✅ | IndexedDB queue, auto-sync on reconnect, idempotent replay |
 | Live updates | ✅ | Socket.IO, authenticated, room per event, owner-only |
-| Tests | ✅ | 56 integration tests against a real database |
+| AI insights | ✅ | Facts computed in SQL; the model only phrases them; raw-number fallback |
+| Tests | ✅ | 69 integration tests against a real database |
 
 ## Not implemented yet
 
@@ -38,7 +39,6 @@ reads and writes PostgreSQL through the API.
 | ----------- | --------- |
 | Standalone 100+ concurrent request proof script + log | 3 |
 | Rotating / expiring QR tokens (currently long-lived opaque tokens) | 4 |
-| AI natural-language insights, server-side | 4 |
 
 ---
 
@@ -98,6 +98,24 @@ figures. Duplicate scans emit nothing. If the socket is down (blocked proxy, ser
 dashboard falls back to polling every 15 seconds rather than freezing, and shows
 "Reconnecting…" instead of "Live".
 
+## AI insights
+
+`POST /api/events/:id/insights` takes a plain-English question. The server computes every figure
+first — checked in, no-shows and the no-show percentage, spots left, the busiest 15-minute window,
+first and last arrival — and passes only those finished numbers to Claude, with a system prompt
+forbidding it from calculating, estimating or inventing anything. The model's only job is wording.
+Both the answer and the `facts` it was based on come back, and the dashboard shows the key figures
+as chips beside the answer so the organizer can check them.
+
+The key lives in `ANTHROPIC_API_KEY`, server-side only; `server/src/lib/insights.ts` is never
+imported by the client. With no key, a timeout (default 8s, `AI_TIMEOUT_MS`), an API error or an
+empty response, the endpoint returns those same computed numbers as plain text, labelled "Raw
+numbers" in the UI — the organizer always gets an answer. The frontend shows a spinner and disables
+the Ask button while waiting.
+
+The four required questions are the dashboard's suggested prompts, and every figure they need is
+asserted in the test suite.
+
 ## Database
 
 Four tables. The constraints are the design:
@@ -136,7 +154,7 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 
 ## Verification performed
 
-**Automated** — `npm test`: 56 tests, 56 passing, 0 failing (~15s).
+**Automated** — `npm test`: 69 tests, 69 passing, 0 failing (~24s).
 
 - auth: signup, login, wrong password, logout, unauthenticated rejection, duplicate email, malformed
   input, bcrypt hash stored, no `passwordHash` in any response, tampered cookie rejected
@@ -146,6 +164,11 @@ short-lived rotating tokens, and the write-up will cover the tradeoff.
 - registration: valid, duplicate, nonexistent event, finished event, invalid capacity (0, negative,
   fractional, non-numeric), backwards dates
 - check-in: valid, duplicate (with the original timestamp), invalid token, wrong event, empty token
+- AI insights: the four required figures are computed correctly from the database, including the
+  no-peak and nobody-registered edge cases; question validation; owner-only access; no key material
+  in any response. Against a stub Anthropic endpoint: the model's wording is used on success, the
+  computed facts and the "never calculate" instruction are actually sent, and a timeout, an API
+  error and an empty response each fall back to the raw numbers with the right reason.
 - offline: queued scan checks in on sync and keeps the door time; replaying a batch (serially and
   8× concurrently) never makes a second check-in; A-syncs-after-B reports a duplicate and corrects
   the time backwards; the later queued scan leaves the time alone; invalid and wrong-event scans are

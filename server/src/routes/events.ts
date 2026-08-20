@@ -10,6 +10,7 @@ import { serializeEvent, serializeTicket } from '../lib/serialize.js';
 import { toCsv } from '../lib/csv.js';
 import { recordCheckIn } from '../lib/checkin.js';
 import { emitCheckIn } from '../lib/realtime.js';
+import { answerEventQuestion, computeEventFacts } from '../lib/insights.js';
 
 export const eventsRouter = Router();
 
@@ -383,6 +384,43 @@ eventsRouter.get(
       })),
       arrivals: arrivals.map((a) => a.checkedInAt.toISOString()),
     });
+  }),
+);
+
+const insightsSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(3, 'Ask a question about this event')
+    .max(300, 'That question is a bit long'),
+});
+
+/**
+ * POST /api/events/:eventId/insights — owner only.
+ *
+ * Answers a plain-English question about the event. The numbers are computed
+ * from the database here; the model only phrases them. `facts` is returned
+ * alongside the answer so the dashboard can show what the answer was based on,
+ * and so a fallback answer is exactly as useful as an AI one.
+ */
+eventsRouter.post(
+  '/:eventId/insights',
+  requireRole('ORGANIZER'),
+  asyncHandler(async (req, res) => {
+    const event = await loadOwnedEvent(req.params.eventId, req.user!.id);
+    const { question } = parseBody(insightsSchema, req.body);
+
+    res.json(await answerEventQuestion(event.id, question));
+  }),
+);
+
+/** GET /api/events/:eventId/insights/facts — the computed numbers, no AI. */
+eventsRouter.get(
+  '/:eventId/insights/facts',
+  requireRole('ORGANIZER'),
+  asyncHandler(async (req, res) => {
+    const event = await loadOwnedEvent(req.params.eventId, req.user!.id);
+    res.json({ facts: await computeEventFacts(event.id) });
   }),
 );
 

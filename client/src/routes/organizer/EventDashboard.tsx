@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { getSocket, type LiveCheckIn } from '../../lib/socket';
+import { InsightsCard } from '../../components/InsightsCard';
 import { useAsync } from '../../lib/useAsync';
 import { formatTime, timeAgo } from '../../lib/format';
 import {
@@ -175,6 +176,8 @@ export function EventDashboard() {
               />
             </div>
           </Card>
+
+          <InsightsCard eventId={event.id} />
 
           <Card>
             <div className="spread" style={{ marginBottom: 4 }}>

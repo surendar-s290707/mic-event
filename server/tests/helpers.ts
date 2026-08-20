@@ -31,7 +31,10 @@ export async function startTestServer(options: { realtime?: boolean } = {}): Pro
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     close: async () => {
+      // socket.io's close() also closes the http server it was attached to,
+      // so only close it here if it is still listening.
       if (options.realtime) await closeRealtime();
+      if (!server.listening) return;
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );

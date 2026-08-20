@@ -9,6 +9,7 @@
  */
 import type {
   EventSummary,
+  InsightAnswer,
   Role,
   ScanResult,
   StatsResponse,
@@ -146,6 +147,14 @@ export const api = {
       timeoutMs: 20_000,
     }),
   stats: (eventId: string) => request<StatsResponse>(`/api/events/${eventId}/stats`),
+  /** Natural-language question about one event. Answered from computed facts. */
+  insights: (eventId: string, question: string) =>
+    request<InsightAnswer>(`/api/events/${eventId}/insights`, {
+      method: 'POST',
+      body: json({ question }),
+      // The server gives the model 8s and then falls back; allow for that.
+      timeoutMs: 15_000,
+    }),
   /** Plain URL — the browser downloads it directly, cookie and all. */
   exportUrl: (eventId: string) => `${BASE_URL}/api/events/${eventId}/export.csv`,
 };

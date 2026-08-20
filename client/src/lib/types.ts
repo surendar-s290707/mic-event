@@ -111,3 +111,30 @@ export type ScannerFeedback = ScanResult | QueuedLocally;
 
 /** Derived from an event's own times — never stored, so it cannot go stale. */
 export type EventStatus = 'upcoming' | 'live' | 'ended';
+
+export interface EventFacts {
+  eventName: string;
+  venue: string;
+  startsAt: string;
+  endsAt: string;
+  status: EventStatus;
+  capacity: number;
+  registeredCount: number;
+  checkedInCount: number;
+  spotsLeft: number;
+  noShowCount: number;
+  noShowPercent: number;
+  attendancePercent: number;
+  firstCheckInAt: string | null;
+  lastCheckInAt: string | null;
+  peakWindow: { startsAt: string; endsAt: string; count: number } | null;
+  busiestWindows: { startsAt: string; count: number }[];
+}
+
+export interface InsightAnswer {
+  answer: string;
+  facts: EventFacts;
+  /** 'ai' when the model phrased it, 'fallback' when the raw numbers are shown. */
+  source: 'ai' | 'fallback';
+  fallbackReason?: 'not_configured' | 'timeout' | 'api_error';
+}

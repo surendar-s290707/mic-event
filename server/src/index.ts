@@ -19,6 +19,11 @@ server.listen(env.port, () => {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     console.log(`[api] ${signal} received, shutting down`);
-    void closeRealtime().then(() => server.close(() => process.exit(0)));
+    // closeRealtime() also closes this http server, since socket.io is
+    // attached to it; only close it again if it somehow survived.
+    void closeRealtime().then(() => {
+      if (server.listening) server.close(() => process.exit(0));
+      else process.exit(0);
+    });
   });
 }

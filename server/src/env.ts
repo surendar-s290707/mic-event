@@ -36,6 +36,22 @@ export const env = {
     return required('JWT_SECRET');
   },
   sessionTtlDays: Number(process.env.SESSION_TTL_DAYS ?? 7),
+  /**
+   * Optional. Without it the insights endpoint still answers, using the raw
+   * numbers it computed. Server-side only — never sent to the browser.
+   * Read lazily so tests can point the SDK at a stub.
+   */
+  get anthropicApiKey(): string | null {
+    return process.env.ANTHROPIC_API_KEY?.trim() || null;
+  },
+  /** Overrides the Anthropic endpoint. Used by tests; unset in production. */
+  get anthropicBaseUrl(): string | undefined {
+    return process.env.ANTHROPIC_BASE_URL?.trim() || undefined;
+  },
+  /** How long the model gets before the endpoint falls back to raw numbers. */
+  get aiTimeoutMs(): number {
+    return Number(process.env.AI_TIMEOUT_MS ?? 8000);
+  },
 };
 
 export const isProduction = env.nodeEnv === 'production';
