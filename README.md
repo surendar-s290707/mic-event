@@ -88,6 +88,7 @@ Or create your own account at `/signup`.
 | `npm run build`      | type-check and build both packages                      |
 | `npm run start:prod` | run the built API with `NODE_ENV=production`            |
 | `npm test`           | integration suite against `TEST_DATABASE_URL`           |
+| `npm run proof:concurrency` | two API processes, one database, 120+ simultaneous requests |
 | `npm run lint`       | ESLint over client, server and tests                    |
 | `npm run typecheck`  | TypeScript, no emit, both packages                      |
 | `npm run db:up`      | start PostgreSQL in Docker                              |

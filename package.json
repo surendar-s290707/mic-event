@@ -23,7 +23,8 @@
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio --schema prisma/schema.prisma",
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "proof:concurrency": "node scripts/concurrency-proof.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

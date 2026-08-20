@@ -31,13 +31,13 @@ reads and writes PostgreSQL through the API.
 | Offline scanning | ✅ | IndexedDB queue, auto-sync on reconnect, idempotent replay |
 | Live updates | ✅ | Socket.IO, authenticated, room per event, owner-only |
 | AI insights | ✅ | Facts computed in SQL; the model only phrases them; raw-number fallback |
+| Concurrency proof | ✅ | Two API processes, one database — see docs/concurrency-proof.log |
 | Tests | ✅ | 80 integration tests against a real database |
 
 ## Not implemented yet
 
 | Requirement | Milestone |
 | ----------- | --------- |
-| Standalone 100+ concurrent request proof script + log | 3 |
 
 ---
 
@@ -204,6 +204,20 @@ check-in row.
   sessionless sockets are refused; one event's check-ins never leak into another's room
 - concurrency: 20 simultaneous registrations on a capacity-3 event → exactly 3 rows; 12 simultaneous
   scans of one ticket → exactly 1 check-in row
+
+**Concurrency proof** — `npm run proof:concurrency` starts two API processes on ports 4101 and 4102
+against the same database and hammers both at once. Output committed at
+[docs/concurrency-proof.log](docs/concurrency-proof.log):
+
+| Test | Result |
+| ---- | ------ |
+| 120 simultaneous registrations for 25 seats | 25 created, 95 `event_full`, **25 rows** — 376 ms |
+| 60 simultaneous scans of one ticket | 1 succeeded, 59 `ALREADY_CHECKED_IN`, **1 row** — 72 ms |
+| All 25 tickets scanned twice over, concurrently | **25 check-in rows**, one per registration |
+
+Two processes is the point: an in-process mutex or a JavaScript counter passes on one process and
+fails here. The guarantees come from the database — a `SELECT … FOR UPDATE` row lock inside the
+registration transaction, and unique indexes on `(eventId, userId)` and `CheckIn.registrationId`.
 
 **Manual, end to end in a browser** — organizer signup → create event (rejecting a past date and
 capacity 0 first) → attendee signup (rejecting a 5-character password) → register (3 seats → 2) →
