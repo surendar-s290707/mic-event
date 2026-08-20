@@ -1,0 +1,28 @@
+# Local PostgreSQL for development.
+#   docker compose up -d      start
+#   docker compose down       stop (data survives)
+#   docker compose down -v    stop and wipe the data volume
+#
+# Credentials here are local-development only and match the DATABASE_URL in
+# .env.example. Production uses a managed database and a real secret.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mic-event-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mic
+      POSTGRES_PASSWORD: mic
+      POSTGRES_DB: mic_event
+    ports:
+      - '5432:5432'
+    volumes:
+      - mic-event-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mic -d mic_event']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mic-event-db:

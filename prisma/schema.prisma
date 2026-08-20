@@ -1,16 +1,20 @@
 // ===========================================================================
-// DRAFT SCHEMA — NOT MIGRATED YET.
+// MIC Event — database schema
 // ===========================================================================
-// There is no database in this milestone: nothing here has been generated,
-// migrated or queried. It is checked in so the mock data shapes in
-// client/src/lib/types.ts have an obvious destination, and so the constraints
-// that the hard requirements depend on are decided before the code is written.
+// Four tables, one job each: who people are, what is happening, who signed up,
+// and who actually walked in.
 //
-// The two constraints that matter most:
-//   Registration @@unique([eventId, attendeeId]) — one registration per person
-//   CheckIn      registrationId @unique          — one check-in per registration
-// Those are what actually prevent duplicate check-ins across several server
-// processes; application-level checks are only a fast path in front of them.
+// The constraints below are the ones the hard requirements depend on, so they
+// are worth reading before the code:
+//
+//   Registration @@unique([eventId, userId]) — one registration per person per
+//     event, enforced by Postgres rather than by an application check.
+//   Registration.qrToken @unique            — the opaque value inside the QR;
+//     looking a ticket up is an indexed single-row read.
+//   CheckIn.registrationId @unique          — a registration can produce at
+//     most one check-in. A second scan fails the insert; the handler turns
+//     that failure into "already checked in", which is what makes duplicate
+//     protection correct even with several server processes on one database.
 
 generator client {
   provider = "prisma-client-js"
@@ -26,22 +30,16 @@ enum Role {
   ATTENDEE
 }
 
-enum CheckInMethod {
-  SCAN
-  MANUAL
-  OFFLINE_SYNC
-}
-
 model User {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String
-  email        String         @unique
+  email        String   @unique
   passwordHash String
   role         Role
-  createdAt    DateTime       @default(now())
+  createdAt    DateTime @default(now())
 
-  events        Event[]
-  registrations Registration[]
+  organizedEvents Event[]        @relation("EventOrganizer")
+  registrations   Registration[]
 }
 
 model Event {
@@ -55,34 +53,36 @@ model Event {
   organizerId String
   createdAt   DateTime @default(now())
 
-  organizer     User           @relation(fields: [organizerId], references: [id])
+  organizer     User           @relation("EventOrganizer", fields: [organizerId], references: [id])
   registrations Registration[]
 
+  @@index([organizerId])
   @@index([startsAt])
 }
 
 model Registration {
-  id         String   @id @default(cuid())
-  eventId    String
-  attendeeId String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  eventId   String
+  userId    String
+  /// Opaque, cryptographically random. Carries no personal data — it is only
+  /// a lookup key, so a leaked QR image reveals nothing about its owner.
+  qrToken   String   @unique
+  createdAt DateTime @default(now())
 
-  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  attendee User     @relation(fields: [attendeeId], references: [id])
-  checkIn  CheckIn?
+  event   Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIn CheckIn?
 
-  // One person can hold at most one registration per event.
-  @@unique([eventId, attendeeId])
+  @@unique([eventId, userId])
   @@index([eventId])
 }
 
 model CheckIn {
-  id             String        @id @default(cuid())
-  registrationId String        @unique // <- what makes a second scan fail
-  checkedInAt    DateTime      @default(now())
-  method         CheckInMethod @default(SCAN)
-  // Set for scans that were queued offline, so sync is idempotent.
-  clientScanId   String?       @unique
+  id             String   @id @default(cuid())
+  registrationId String   @unique
+  checkedInAt    DateTime @default(now())
+  /// Which scanner recorded it — useful once several doors scan at once.
+  stationId      String?
 
   registration Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 }
