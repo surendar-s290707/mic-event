@@ -132,6 +132,18 @@ describe('rotating ticket tokens', () => {
     assert.equal(response.body.reason, 'INVALID_TICKET');
   });
 
+  it('calls a forged code invalid, not expired, even if it claims a past expiry', async () => {
+    const { organizer, event } = await scenario();
+
+    // Signature is verified before the expiry is believed, so a made-up token
+    // is never dressed up as "your code just timed out".
+    const response = await organizer.post(`/api/events/${event.id}/check-in`, {
+      token: 'MIC1.not-a-real-registration.999.nonsense',
+    });
+
+    assert.equal(response.body.reason, 'INVALID_TICKET');
+  });
+
   it('refuses malformed and empty-ish codes', async () => {
     const { organizer, event } = await scenario();
 

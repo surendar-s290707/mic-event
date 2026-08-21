@@ -76,20 +76,25 @@ export async function resolveTicketToken(raw: string, seenAt: Date): Promise<Tic
   const expiry = Number(expiryText);
   if (!Number.isFinite(expiry)) return { ok: false, failure: 'malformed' };
 
-  if (Math.floor(seenAt.getTime() / 1000) > expiry) return { ok: false, failure: 'expired' };
-
   const registration = await prisma.registration.findUnique({
     where: { id: registrationId },
     select: { qrToken: true },
   });
   if (!registration) return { ok: false, failure: 'unknown_registration' };
 
+  // Authenticate before trusting anything the token claims. The expiry is part
+  // of the signed payload, so checking it first would mean acting on
+  // unverified input — and would tell someone waving a forged code to "get a
+  // fresh one", which is both wrong and unhelpful.
   const expected = sign(registrationId, expiry, registration.qrToken);
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);
-  // Constant-time compare, and length-check first since timingSafeEqual throws
+  // Constant-time compare, length-checked first since timingSafeEqual throws
   // on a length mismatch.
   if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, failure: 'bad_signature' };
+
+  // Only now is the expiry a fact rather than a claim.
+  if (Math.floor(seenAt.getTime() / 1000) > expiry) return { ok: false, failure: 'expired' };
 
   return { ok: true, registrationId };
 }
